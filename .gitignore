@@ -1,0 +1,12 @@
+# fetched by fetch_deps.sh
+deps/
+clap_project/include/
+# builds
+build/
+build_linux/
+build_tests/
+build_pkg/
+dist/
+build_log.txt
+.DS_Store
+._*

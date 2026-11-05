@@ -1,0 +1,24 @@
+{
+    "CmajorVersion": 1,
+    "ID": "com.voxmirastudio.charivari",
+    "version": "1.0.1",
+    "name": "Charivari",
+    "description": "Rough music for one sound: one sample paraded as sixteen caricatured mummers",
+    "manufacturer": "Vox Mira Studio",
+    "category": "instrument",
+    "isInstrument": true,
+    "source": "dsp.cmajor",
+    "view": {
+        "src": "index.js",
+        "width": 1100,
+        "height": 740,
+        "resizable": true
+    },
+    "resources": [
+        "assets/**"
+    ],
+    "plugin": {
+        "manufacturerCode": "VxMs",
+        "pluginCode": "Chrv"
+    }
+}

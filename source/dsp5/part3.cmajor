@@ -1,0 +1,1642 @@
+
+    // =================================================================================== playing
+    struct Voice
+    {
+        bool active;
+        int child;          // -1: the subject (parent)
+        int pad; int note; int age;
+        float64 pos;        // position in the mummer (before GESTURE)
+        float64 lpos;       // position in the stasis loop
+        int stage;          // 0 mummer, 1 fade into stasis, 2 stasis, 3 fade from stasis to the mummer's end
+        float xf;
+        bool held; bool sustain;
+        float env; int envStage;                          // ADSR: 0 attack, 1 decay, 2 sustain, 3 release
+        float gain;
+        bool cutting; float cutMul; float cut;            // choke (solo voicing, stolen voice, new troupe)
+        int lenCut;                                       // the subject's length when the cut began (V6.1)
+        float64 ghP; float64 ghO; float ghV; float ghVO; float ghX; float ghG; bool ghOn;   // SHADOW's reader (V6.1)
+        int markIdx; bool markHit; int ctl;
+        float gG; float gC; float gM; float gH;           // smoothed pole amounts
+        bool onC; bool onM; bool onH;
+        bool segInit; float64 segA; float64 segB; float64 revPos; float64 tailPos; float tailX; float tailStep; float64 gap;   // GESTURE
+        float64 gxA; float64 gxP; float64 gxT; float64 gxLs; float64 gxD; bool gxOn; float64 gxFOld; float gxFX; float gxFStep;   // (V6.8) GESTURE, struck
+        float pin; float pout; float agc;                 // loudness kept while the poles move
+        float pl; float pr; float pw;                     // the pad's place, gliding (V6.2)
+        float pg;                                         // the pad's gain, gliding (V6.4)
+        float lastF0; float loudPrev; float ratio;        // ratio: FLESH's current transposition (MASK and BODY follow it)
+        // BODY: three lines, rotation
+        float[2048] cx; float[2048] cy; float[2048] cz; int cw;
+        float[3] cLs; float[3] cLst; float[3] clp;
+        float cal; float cbe; float cga; float cvel;
+        float[9] cR; float cfb; float cin; float cdamp; bool cInit;
+        float[9] cRd; float[3] cP; float[3] cPd; float cA; bool cInitR; bool cGl; float cfbD; float cinD; float cdampD; float cRamp;
+        // FLESH: heterodyne bank
+        float<2>[96] hzI; float<2>[96] hzQ;               // (V6.5) four states per harmonic: two SVF sections
+        float[6] hsv;                                      // their coefficients (a1 a2 a3 of each section)
+        float[24] hpr; float[24] hpi; float[24] hgk; float[24] hgS; float[24] hfk; float[24] hcw; float[24] hsw;
+        float64 hphi; float64 hdphi; float hf0; float hdc; int hKr; float hlp; float hdHz; float64 hsph;
+        float hwet; float hws; float hwsS; int hren;
+        float<2>[16] hA; float<2>[16] hB; float<2> hd;
+        // MASK: bells, stain, spring comb
+        float<2>[12] mb; float[18] mpar; float[18] mparD; float<2>[2048] mcomb; int mw;
+        float mtau; float mtauC; float mtauS; float mtv; float mfbc; float md; float mfbcD; float mdD; bool mInit;
+        // LACQUER (V6.3): demodulation of the middle (two poles), gains / complements / places gliding over a control block,
+        // the relative phase of each partial (tracked), the attractor, the dry/wet
+        float[24] lI1; float[24] lI2; float[24] lQ1; float[24] lQ2;
+        float[24] lg; float[24] lgS;
+        float[24] lcm; float[24] lcmS; float[24] lur; float[24] lui; float[24] lrc; float[24] lrs;   // (V6.5) complement, polar
+        float[24] lpl; float[24] lplS; float[24] lpr; float[24] lprS; float[24] lDr; float[24] lDi; int[24] lWarm;
+        float64 lth; float64 ldth; float llp; int lK; int lKt; int lCtl;
+        float64 lx; float64 ly; float64 lz; float64 lsph; float lt;
+        float lw; bool lqOn;
+        // (V6.5) the voicing gate (FLESH and LACQUER act on partials only where the anatomy trusts a pitch)
+        float vg; float vgS; bool vgI;
+        float gxC; float gxS; float gxR;                  // (V6.5) GESTURE: running correlation of the forward and reversed readings
+        float hxC; float hxS; float hxR; float xfLen;    // (V6.6) HOLD: the same between the mummer and its stasis; the entry's length
+        float[24] lph; float64 lcph;                      // (V6.6) LACQUER: the phases of each partial's life and of the circulation
+        float[3] lcs;                                     // (V6.6) LACQUER: the touches' slow walk
+        // (V6.5) MASK's folder at twice the rate (Phalène's 47-tap Kaiser halfband, −94 dB) with first-order ADAA: the input
+        // ring, the even and odd output rings, their index, the previous input of the ADAA (per channel)
+        float<2>[24] mhU; float<2>[24] mhE; float<2>[24] mhO; int mhI; float64 mfx0; float64 mfx1;
+        // the dry sound through the same chain (its two-point mean at twice the rate = the ADAA of a straight line), so the
+        // sound and its stain stay exactly aligned (23.25 samples); its previous input; MASK's crossfade with the dry sound
+        float<2>[24] mhLE; float<2>[24] mhLO; float<2> mxp; float mxf;
+        float<2>[4] mcq;                                   // the last four sums, for the correction of the ADAA's mean
+        // HOLD GRAINS (V6.4): six grain readers (source position, step, age and length in source frames, level, place), the
+        // countdown to the next onset, the Weyl index, the cloud's share (0 → 1 at the stasis entry)
+        float64[10] grP; float[10] grI; float[10] grA; float[10] grL; float[10] grG; float[10] grPn;
+        float grNext; int grCount; float grMix; float grMixS; float64 grC; float grDir; float64 grT; float grPh;
+    }
+    Voice[NV] voices;
+    int ageCounter = 0;
+    float srOut = 48000.0f;
+    float kGl20 = 0.0f; float kGl30 = 0.0f; float kGl60 = 0.0f; float kVel = 0.0f;
+    float filS = 0.0f; float kFil = 0.001f;            // SHADOW, smoothed sample by sample (20 ms)
+    float kPan = 0.002f;                               // a pad's place glides in 10 ms
+    float kGx = 0.004f;                                // (V6.5) GESTURE's correlation: 5 ms
+    float kHx = 0.001f;                                // (V6.6) HOLD's correlation: 20 ms
+    float[24] lhC; float[24] lhS;                      // (V6.6) each partial's direction of drift (golden angles)
+    float[25] lnK;
+    // (V6.5) BANDLIMITED READING (the brain's resample.js, kernel A, for real time): a Kaiser-windowed sinc of 16 zero
+    // crossings per side (32 taps), β 10.06 (100 dB), cut at 24 kHz with its transition from 19.2 to 28.8 kHz — tabulated in
+    // 512 phases per sample (linear interpolation between phases: ≤ −106 dB per tap), stretched by the reading speed when it
+    // reads faster than the sound (cut at Nyquist / q, up to q = 4). Every reader used a 4-point Hermite: −2.5 dB at 15 kHz
+    // and −8 dB at 20 kHz half-way between two samples, a response that moved with the fraction (a time-varying filter, its
+    // images at −20 to −40 dB), and no anti-aliasing at all when a host at 44.1 kHz reads a 48 kHz mummer 9 % faster. At a
+    // whole position (48 kHz host, no detune) the sample itself is read: nothing changes there, nothing is spent
+    let KRW = 16; let KRP = 512;
+    float[8194] kr;
+
+    float besselI0 (float64 x)
+    {
+        float64 s = 1.0; float64 t = 1.0;
+        for (int k = 1; k < 60; ++k) { float64 h = x / float64 (2 * k); t *= h * h; s += t; if (t < 1.0e-17 * s) break; }
+        return float (s);
+    }
+    void initKernel()
+    {
+        float64 beta = 10.06; float64 i0b = float64 (besselI0 (beta));
+        for (int i = 0; i < KRW * KRP + 2; ++i)
+        {
+            float64 t = float64 (i) / float64 (KRP); float64 u = t / float64 (KRW);
+            if (u >= 1.0) { kr.at (i) = 0.0f; continue; }
+            float64 a = pi * t;
+            float64 sn = t == 0.0 ? 1.0 : sin (a) / a;
+            kr.at (i) = float (sn * float64 (besselI0 (beta * sqrt (1.0 - u * u))) / i0b);
+        }
+    }
+    float krAt (float x)                       // x = distance × KRP / q, ≥ 0
+    {
+        int ii = int (x);
+        if (ii >= KRW * KRP) return 0.0f;
+        return kr.at (ii) + (kr.at (ii + 1) - kr.at (ii)) * (x - float (ii));
+    }
+    float<2> parentFrame (int i, int lim) { return (i < 0 || i >= lim) ? float<2> (0.0f) : parentBuf.at (i); }
+
+    void initConsts()
+    {
+        srOut = float (processor.frequency);
+        kGl20 = 1.0f - float (exp (-float (CTRL) / (0.02f * srOut)));
+        kGl30 = 1.0f - float (exp (-float (CTRL) / (0.03f * srOut)));
+        kGl60 = 1.0f - float (exp (-float (CTRL) / (0.06f * srOut)));
+        kVel = float (exp (-float (CTRL) / (0.4f * srOut)));
+        kFil = 1.0f - float (exp (-1.0f / (0.02f * srOut)));
+        kPan = 1.0f - float (exp (-1.0f / (0.01f * srOut)));
+        kGx = 1.0f - float (exp (-1.0f / (0.005f * srOut)));
+        kHx = 1.0f - float (exp (-1.0f / (0.02f * srOut)));
+        for (int q = 0; q < 24; ++q) { float fk = float (q + 1) * 0.618034f; fk -= floor (fk); lhC.at (q) = float (cos (float (twoPi) * fk)); lhS.at (q) = float (sin (float (twoPi) * fk)); }
+        for (int q = 0; q <= KMAX; ++q) lnK.at (q) = float (log (float (max (q, 1))));
+        initKernel();
+    }
+
+    void padJoy (int pad, float& x, float& y)
+    {
+        // (V6.3) the subject has its own joystick, outside the troupe's
+        if (pad < 0) { x = joy.at (32); y = joy.at (33); return; }
+        x = clamp (joy.at (pad * 2) + popX, -1.0f, 1.0f);
+        y = clamp (joy.at (pad * 2 + 1) + popY, -1.0f, 1.0f);
+    }
+    float smooth01 (float a, float b, float x) { float t = clamp ((x - a) / (b - a), 0.0f, 1.0f); return t * t * (3.0f - 2.0f * t); }
+
+    float<2> hilbertCell (float<2> x, float<2>& x1, float<2>& x2, float<2>& y1, float<2>& y2, float a2)
+    {
+        float<2> y = (x + y2) * a2 - x2;
+        x2 = x1; x1 = x; y2 = y1; y1 = y;
+        return y;
+    }
+    float hermite1 (float xm1, float x0, float x1, float x2, float t)
+    {
+        float c1 = 0.5f * (x1 - xm1); float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2; float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+        return ((c3 * t + c2) * t + c1) * t + x0;
+    }
+    float<2> hermite (float<2> xm1, float<2> x0, float<2> x1, float<2> x2, float t)
+    {
+        float<2> c = (x1 - xm1) * 0.5f;
+        float<2> v = x0 - x1;
+        float<2> w = c + v;
+        float<2> a = w + v + (x2 - x0) * 0.5f;
+        float<2> b = w + a;
+        return (((a * t) - b) * t + c) * t + x0;
+    }
+
+    // ------------------------------------------------------------------ GESTURE
+    // The gesture turned inside out: every segment between two events of the mummer (its attacks, at the sample; otherwise
+    // its note changes; otherwise its loudness swells; otherwise the whole mummer, one breath) is played BACKWARDS, so each
+    // attack becomes a swell that sucks the sound into the event. The amount fades (equal power) from the forward reading
+    // to the reversed one; at each event the reversed reading that reached the attack goes on fading backwards through it
+    // while the next reversed segment fades in (up to 20 ms, a third of a short segment).
+    float<2> childGesture (Voice& vo, int k, float64 u, float64 stepR)
+    {
+        if (gxBody.at (k) > 0.0f && anaReady.at (k)) return childGestureStruck (vo, k, u, stepR);
+        int len = childLen.at (k);
+        int n = nMarks.at (k);
+        bool crossed = ! vo.segInit;
+        bool jumped = false;
+        if (vo.segInit && u < vo.segA) { vo.markIdx = 0; crossed = true; jumped = true; }    // back from stasis
+        while (vo.markIdx < n && float64 (marks.at (k * 256 + vo.markIdx)) <= u) { vo.markIdx += 1; crossed = true; if (! jumped) vo.markHit = true; }
+        if (crossed)
+        {
+            float64 a = vo.markIdx == 0 ? 0.0 : float64 (marks.at (k * 256 + vo.markIdx - 1));
+            float64 b = vo.markIdx < n ? float64 (marks.at (k * 256 + vo.markIdx)) : float64 (len);
+            if (vo.segInit && ! jumped) { vo.tailPos = vo.revPos; vo.tailX = 0.0f; } else vo.tailX = 1.0f;
+            vo.segA = a; vo.segB = b; vo.segInit = true;
+            // crossfade at each event: a third of the segment, 64 samples to 60 ms (v5.2: +40 ms, was 20 ms at most)
+            vo.tailStep = float (stepR / clamp ((b - a) / 3.0, 240.0, 2880.0));     // (V6.5) at least 5 ms (it was 64 samples)
+        }
+        float64 hi = float64 (len - 3);
+        vo.revPos = clamp (vo.segA + vo.segB - u, 1.0, hi);
+        vo.gap = clamp (u, 1.0, hi);
+        bool tailOn = vo.tailX < 1.0f;
+        if (tailOn) { vo.tailX = min (1.0f, vo.tailX + vo.tailStep); vo.tailPos = max (1.0, vo.tailPos - stepR); }
+        float qR = float (stepR);
+        float<2> s = readChild (k, vo.gap, qR);
+        float g = min (1.0f, vo.gG);
+        if (g <= 1e-6f || ! anaReady.at (k)) return s;
+        float<2> r = readChild (k, vo.revPos, qR);
+        if (tailOn)
+        {
+            float x = vo.tailX;
+            r = r * float (sin (0.5 * pi * float64 (x))) + readChild (k, vo.tailPos, qR) * float (cos (0.5 * pi * float64 (x)));
+        }
+        if (g > 0.5f) vo.gap = vo.revPos;
+        // (V6.5) the forward and the reversed readings cross in the middle of each segment: there they are the same sound, and
+        // the equal-power mix rose by up to 3 dB (and fell where they were opposed). The mix is divided by √(1 + 2ρ·a·b), ρ
+        // their correlation over the last 5 ms: the level stays the sound's own whatever the two readings have in common
+        float a = float (cos (0.5 * pi * float64 (g))); float b = float (sin (0.5 * pi * float64 (g)));
+        float ms = 0.5f * (s[0] + s[1]); float mr = 0.5f * (r[0] + r[1]);
+        vo.gxC += (ms * mr - vo.gxC) * kGx; vo.gxS += (ms * ms - vo.gxS) * kGx; vo.gxR += (mr * mr - vo.gxR) * kGx;
+        float rho = clamp (vo.gxC / float (sqrt (vo.gxS * vo.gxR + 1e-12f)), -0.5f, 1.0f);
+        float kk = 1.0f / float (sqrt (max (0.25f, 1.0f + 2.0f * rho * a * b)));
+        return (s * a + r * b) * kk;
+    }
+
+    // (V6.8) GESTURE on a STRUCK mummer (Mat chose the short swell: « 1, mais en faisant attention que les segments restent
+    // cohérents avec les mesures temporelles, toujours dans la plus grande cohérence musicale et mathématique »). The whole
+    // segment read backwards started where the hit had died out (measured: t_d_kik_05, a 2 s segment starting at −69 dB, the
+    // body within 20 dB reached after 1.6 s; Bass_Lindrum_09 read whole backwards, −66 dB, its body after 40 ms). Now each
+    // attack gets a SWELL: its own body read backwards, from Ls past the attack's peak back to the peak, then the hit forward
+    // from it — the whole mummer delayed by Ls, so every hit keeps its place against the others and lands Ls later. Ls is a value of the
+    // subject's beat (1/16 to 4 beats) when it has a pulse, otherwise a fraction of the body itself (¼ ⅓ ½ ⅔ ¾ 1), never
+    // longer than the body (to −20 dB) nor than the shortest gap between two attacks; GESTURE's amount picks it, from none
+    // to the longest, at each attack (and at the note's start). Under a swell, the hit before it rings on (they add, as two
+    // sounds would); a change of length fades the old reading out in 10 ms.
+    float64 gxLadder (int k, float g)
+    {
+        float64 body = float64 (gxBody.at (k));
+        if (body <= 0.0 || g <= 0.0f) return 0.0;
+        float64 cap = min (body, float64 (gxMinSeg.at (k)));
+        float64[14] fr = (0.0625, 0.0833333333333, 0.125, 0.166666666667, 0.25, 0.333333333333, 0.5, 0.666666666667, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0);
+        float64[14] c;
+        int m = 0;
+        if (lmBeat > 0.0f)
+        {
+            float64 beat = float64 (FS) / float64 (lmBeat);
+            for (int i = 0; i < 14; ++i) { float64 v = beat * fr.at (i); if (v <= cap && v >= 192.0 && m < 14) { c.at (m) = v; m += 1; } }
+        }
+        if (m == 0) for (int i = 4; i < 10; ++i) { c.at (m) = cap * fr.at (i); m += 1; }
+        int idx = int (float (m) * g + 0.5f);
+        return idx <= 0 ? 0.0 : c.at (min (idx, m) - 1);
+    }
+    float<2> childGestureStruck (Voice& vo, int k, float64 u, float64 stepR)
+    {
+        int len = childLen.at (k);
+        int n = nMarks.at (k);
+        float64 hi = float64 (len - 3);
+        float qR = float (stepR);
+        float g = min (1.0f, vo.gG);
+        if (! vo.segInit || u < vo.gxT)
+        {
+            // the note's start (or a jump back): attacks already passed are skipped; a mummer that opens with a hit swells
+            // into it at once
+            vo.segInit = true; vo.markIdx = 0;
+            while (vo.markIdx < n && float64 (marks.at (k * 256 + vo.markIdx)) <= u) vo.markIdx += 1;
+            vo.tailX = 1.0f; vo.gxFX = 1.0f;
+            vo.gxD = gxLadder (k, g); vo.gxLs = vo.gxD; vo.gxT = u; vo.gxOn = false;
+            if (gxOpen.at (k) && vo.gxLs > 0.5) { vo.gxA = 0.0; vo.gxP = float64 (gxPk0.at (k)); vo.gxOn = u < vo.gxP + vo.gxLs; }
+        }
+        // the swell lands (before the next attack is taken: the longest swell lands on that very sample): from here the
+        // delayed reading carries the hit, on the very sample the swell reached
+        if (vo.gxOn && 2.0 * vo.gxP + vo.gxLs - u <= vo.gxP) { vo.gxOn = false; vo.markHit = true; }
+        bool trig = false; float64 A = u; float64 Pk = u;
+        while (vo.markIdx < n && float64 (marks.at (k * 256 + vo.markIdx)) <= u)
+        { A = float64 (marks.at (k * 256 + vo.markIdx)); Pk = float64 (gxPk.at (k * 256 + vo.markIdx)); vo.markIdx += 1; trig = true; }
+        if (trig)
+        {
+            float64 Ls = gxLadder (k, g);
+            // a swell still under way (none should outlast the next attack) goes on backwards, fading out in 10 ms
+            if (vo.gxOn) { vo.tailPos = 2.0 * vo.gxP + vo.gxLs - u; vo.tailX = 0.0f; vo.tailStep = float (stepR / 480.0); }
+            // a new length: the old delayed reading fades out in 10 ms
+            if (abs (Ls - vo.gxD) > 0.5) { vo.gxFOld = u - vo.gxD; vo.gxFX = 0.0f; vo.gxFStep = float (stepR / 480.0); vo.gxD = Ls; }
+            vo.gxT = u; vo.gxA = A; vo.gxP = max (A, Pk); vo.gxLs = Ls; vo.gxOn = Ls > 0.5;
+            if (! vo.gxOn) vo.markHit = true;                                        // no swell: the attack is heard now
+        }
+        // the mummer, delayed by the swell; while a swell climbs to an attack, the delayed reading is silent from that
+        // attack's onset (1 ms) to its peak, where it takes over: the attack's rise is the swell itself
+        float64 pF = u - vo.gxD;
+        float gF = vo.gxOn ? float (clamp ((vo.gxA - pF) / 48.0, 0.0, 1.0)) : 1.0f;
+        float<2> y = pF >= 0.0 && gF > 0.0f ? readChild (k, clamp (pF, 1.0, hi), qR) * gF : float<2> (0.0f);
+        if (vo.gxFX < 1.0f)
+        {
+            float x = vo.gxFX;
+            float<2> o = vo.gxFOld >= 0.0 && vo.gxFOld < hi ? readChild (k, max (1.0, vo.gxFOld), qR) : float<2> (0.0f);
+            y = y * float (sin (0.5 * pi * float64 (x))) + o * float (cos (0.5 * pi * float64 (x)));
+            vo.gxFX = min (1.0f, x + vo.gxFStep); vo.gxFOld = vo.gxFOld + stepR;
+        }
+        vo.gap = clamp (max (pF, 0.0), 1.0, hi);
+        // the swell: the body read backwards from Ls past the attack's peak down to the peak, reached as the delayed mummer
+        // reaches it (5 ms in)
+        if (vo.gxOn)
+        {
+            float64 pS = 2.0 * vo.gxP + vo.gxLs - u;
+            float wi = float (min (1.0, (u - vo.gxT) / 240.0));
+            y += readChild (k, clamp (pS, 1.0, hi), qR) * wi;
+            vo.gap = clamp (pS, 1.0, hi);
+        }
+        if (vo.tailX < 1.0f)
+        {
+            float x = vo.tailX;
+            y += readChild (k, clamp (vo.tailPos, 1.0, hi), qR) * float (cos (0.5 * pi * float64 (x)));
+            vo.tailX = min (1.0f, x + vo.tailStep); vo.tailPos = max (1.0, vo.tailPos - stepR);
+        }
+        return y;
+    }
+    // what is heard of the mummer when GESTURE delays it (struck mummers)
+    float64 gxDelay (Voice& vo, int k) { return gxBody.at (k) > 0.0f && anaReady.at (k) ? vo.gxD : 0.0; }
+
+    // ------------------------------------------------------------------ FLESH
+    // Heterodyne bank on the harmonics of the measured pitch (as in Carrousel): each harmonic k is demodulated
+    // (V6.5: 4th-order Butterworth low-pass, two trapezoidal state-variable sections, −3 dB at 0.3·f0 (≤ 250 Hz); the two
+    // cascaded one-poles at 0.35·f0 let each neighbouring harmonic in at −19 dB — shifted by two semitones, a steady
+    // harmonic sound came out 11.3 dB from its ideal transposition; now 37.3 dB (simulated, f0 200 Hz, 24 harmonics), the
+    // residual the bank leaves from −11.9 to −39.7 dB), then resynthesised at fN = k·f0 + (s−1)·f0·k^α. α slides from 0 (frequency shift: inharmonic
+    // partials) to 1 (pitch shift: partials realigned); s climbs degree by degree on the analysed scale, as a sticky
+    // staircase; σ snaps each partial to the nearest degree; β goes from kept formants (1) to inverted formants
+    // (−0.5). The residual (what the bank does not capture) is frequency-shifted by the fundamental's shift.
+    // two trapezoidal SVF low-pass sections in cascade (Zavalishin / Simper), states z[o .. o+3]
+    float<2> svf2 (float<2>[96]& z, int o, float<2> v0, float A1, float A2, float A3, float B1, float B2, float B3)
+    {
+        float<2> c1 = z.at (o); float<2> c2 = z.at (o + 1);
+        float<2> v3 = v0 - c2; float<2> v1 = c1 * A1 + v3 * A2; float<2> v2 = c2 + c1 * A2 + v3 * A3;
+        z.at (o) = v1 * 2.0f - c1; z.at (o + 1) = v2 * 2.0f - c2;
+        float<2> d1 = z.at (o + 2); float<2> d2 = z.at (o + 3);
+        float<2> w3 = v2 - d2; float<2> w1 = d1 * B1 + w3 * B2; float<2> w2 = d2 + d1 * B2 + w3 * B3;
+        z.at (o + 2) = w1 * 2.0f - d1; z.at (o + 3) = w2 * 2.0f - d2;
+        return w2;
+    }
+    void chairReset (Voice& vo)
+    {
+        for (int q = 0; q < 96; ++q) { vo.hzI.at (q) = float<2> (0.0f); vo.hzQ.at (q) = float<2> (0.0f); }
+        for (int q = 0; q < 6; ++q) vo.hsv.at (q) = 0.0f;
+        for (int q = 0; q < KMAX; ++q)
+        { vo.hpr.at (q) = 1.0f; vo.hpi.at (q) = 0.0f; vo.hgk.at (q) = 0.0f; vo.hgS.at (q) = 0.0f; vo.hfk.at (q) = 0.0f; vo.hcw.at (q) = 1.0f; vo.hsw.at (q) = 0.0f; }
+        for (int q = 0; q < 16; ++q) { vo.hA.at (q) = float<2> (0.0f); vo.hB.at (q) = float<2> (0.0f); }
+        vo.hd = float<2> (0.0f);
+        vo.hphi = 0.0; vo.hdphi = 0.0; vo.hf0 = 0.0f; vo.hdc = 0.0f; vo.hKr = 0; vo.hlp = 0.01f; vo.hdHz = 0.0f; vo.hsph = 0.0;
+        vo.hwet = 0.0f; vo.hws = 0.0f; vo.hwsS = 0.0f; vo.hren = 0;
+    }
+    void chairControl (Voice& vo, int k, int j0, float u, float f0)
+    {
+        float sr = srOut;
+        float j = vo.gH;
+        float alpha = smooth01 (0.15f, 0.6f, j);
+        float sigma = smooth01 (0.7f, 1.0f, j);
+        float beta = 1.0f - 1.5f * smooth01 (0.5f, 1.0f, j);
+        int D = min (degPerOct(), 12);
+        float c0 = centsAbs (f0);
+        int i0 = nearestIdx (c0);
+        float xx = j * float (D);
+        int xi = int (floor (xx)); float fr = xx - float (xi);
+        float fs = fr - float (sin (float (twoPi) * fr)) / float (twoPi);
+        float d0 = degCents (i0 + xi);
+        float tc = d0 + fs * (degCents (i0 + xi + 1) - d0);
+        float dcT = (tc - c0) * min (1.0f, j / 0.1f);
+        vo.hdc += (dcT - vo.hdc) * kGl60;
+        float s = float (exp (vo.hdc * 0.00057762265f));
+        vo.ratio = s;
+        vo.hf0 = f0;
+        vo.hdphi = float64 (twoPi) * float64 (f0) / float64 (sr);
+        int K = clamp (int (0.45f * sr / f0), 1, KMAX);
+        {
+            float g = float (tan (pi * float64 (min (0.3f * f0, 250.0f)) / float64 (sr)));
+            for (int sct = 0; sct < 2; ++sct)
+            {
+                float kq = sct == 0 ? 1.0f / 0.5411961f : 1.0f / 1.3065630f;
+                float a1 = 1.0f / (1.0f + g * (g + kq)); float a2 = g * a1;
+                vo.hsv.at (3 * sct) = a1; vo.hsv.at (3 * sct + 1) = a2; vo.hsv.at (3 * sct + 2) = g * a2;
+            }
+        }
+        vo.hdHz = (s - 1.0f) * f0;
+        vo.hwsS = (min (1.0f, abs (vo.hdHz) * 0.25f) - vo.hws) / float (CTRL);
+        float lnf0 = float (log (f0));
+        int need = K;
+        for (int q = 0; q < KMAX; ++q)
+        {
+            float gT = 0.0f; float fN = 0.0f;
+            if (q < K)
+            {
+                float kk = float (q + 1);
+                fN = kk * f0 + (s - 1.0f) * f0 * float (exp (alpha * lnK.at (q + 1)));
+                if (sigma > 0.0f) fN += sigma * (snapHz (max (fN, 20.0f)) - fN);
+                if (fN > 20.0f && fN < 0.45f * sr)
+                {
+                    // (V6.5) the envelope between two anatomy frames (it stepped every 1024 frames: an AM at 47 Hz)
+                    float lfN = float (log (fN));
+                    float e0 = aEnvLn (k, j0, lnf0 + lnK.at (q + 1)) * (1.0f - u) + aEnvLn (k, j0 + 1, lnf0 + lnK.at (q + 1)) * u;
+                    float e1 = aEnvLn (k, j0, lfN) * (1.0f - u) + aEnvLn (k, j0 + 1, lfN) * u;
+                    gT = float (pow (10.0f, clamp (beta * (e1 - e0), -24.0f, 12.0f) * 0.05f));
+                }
+                else fN = kk * f0;
+            }
+            else
+            {
+                fN = vo.hfk.at (q) > 0.0f ? vo.hfk.at (q) : float (q + 1) * f0;
+                if (vo.hgk.at (q) > 1e-5f) need = q + 1;
+            }
+            if (vo.hfk.at (q) <= 0.0f) vo.hfk.at (q) = fN;
+            else vo.hfk.at (q) = vo.hfk.at (q) + (fN - vo.hfk.at (q)) * kGl20;
+            vo.hgS.at (q) = (gT - vo.hgk.at (q)) / float (CTRL);
+            // the resynthesis phasor turns at the DIFFERENCE between the new frequency and the tracked harmonic: with no shift
+            // the bank is transparent (same phase as the original harmonic)
+            float w = float (twoPi) * (vo.hfk.at (q) - float (q + 1) * f0) / sr;
+            vo.hcw.at (q) = float (cos (w)); vo.hsw.at (q) = float (sin (w));
+        }
+        // harmonics leaving the bank (rising pitch) finish fading out; beyond that, states are cleared
+        for (int q = need; q < vo.hKr; ++q)
+        {
+            for (int z = 0; z < 4; ++z) { vo.hzI.at (4 * q + z) = float<2> (0.0f); vo.hzQ.at (4 * q + z) = float<2> (0.0f); }
+            vo.hgk.at (q) = 0.0f; vo.hgS.at (q) = 0.0f; vo.hpr.at (q) = 1.0f; vo.hpi.at (q) = 0.0f;
+        }
+        vo.hKr = need;
+    }
+    float<2> chairSample (Voice& vo, float<2> x)
+    {
+        vo.hphi += vo.hdphi;
+        if (vo.hphi > twoPi) vo.hphi -= twoPi;
+        float c1 = float (cos (vo.hphi)); float s1 = float (sin (vo.hphi));
+        float ck = c1; float sk = s1;
+        float<2> recon = float<2> (0.0f); float<2> synth = float<2> (0.0f);
+        float A1 = vo.hsv.at (0); float A2 = vo.hsv.at (1); float A3 = vo.hsv.at (2);
+        float B1 = vo.hsv.at (3); float B2 = vo.hsv.at (4); float B3 = vo.hsv.at (5);
+        float<2> x2 = x * 2.0f;
+        int K = vo.hKr;
+        for (int q = 0; q < K; ++q)
+        {
+            float<2> I = x2 * ck; float<2> Q = x2 * (-sk);
+            float<2> i2 = svf2 (vo.hzI, 4 * q, I, A1, A2, A3, B1, B2, B3);
+            float<2> q2 = svf2 (vo.hzQ, 4 * q, Q, A1, A2, A3, B1, B2, B3);
+            recon += i2 * ck - q2 * sk;
+            float ar = vo.hpr.at (q); float ai = vo.hpi.at (q); float cw = vo.hcw.at (q); float sw = vo.hsw.at (q);
+            float nr = ar * cw - ai * sw; float ni = ar * sw + ai * cw;
+            vo.hpr.at (q) = nr; vo.hpi.at (q) = ni;
+            float cp = ck * nr - sk * ni; float sp = sk * nr + ck * ni;
+            float gk = vo.hgk.at (q) + vo.hgS.at (q); vo.hgk.at (q) = gk;
+            synth += (i2 * cp - q2 * sp) * gk;
+            float nc = ck * c1 - sk * s1; sk = sk * c1 + ck * s1; ck = nc;
+        }
+        vo.hren += 1;
+        if (vo.hren >= 1024)
+        {
+            vo.hren = 0;
+            for (int q = 0; q < K; ++q)
+            {
+                float m = float (sqrt (vo.hpr.at (q) * vo.hpr.at (q) + vo.hpi.at (q) * vo.hpi.at (q)));
+                if (m > 1e-6f) { vo.hpr.at (q) = vo.hpr.at (q) / m; vo.hpi.at (q) = vo.hpi.at (q) / m; }
+            }
+        }
+        // (V6.5) where the anatomy trusts no pitch, the bank lets go: the whole sound is the residual (noise is shifted as one,
+        // not cut into narrow bands around a remembered pitch)
+        float vg = vo.vg;
+        synth *= vg;
+        // residual frequency-shifted (SSB with a Hilbert pair). (V6.5) The one-sample delay belongs to branch A (Niemitalo):
+        // it was on branch B — the image sideband only −18.5 dB down at 1 kHz, −7.7 dB at 3 kHz and none at 6 kHz (a ring
+        // modulation, not a shift); and the sum went the wrong way (the residual moved DOWN while the harmonics moved up).
+        // Now −48 dB at 1 kHz, −54 dB at 3 kHz, −64 dB at 6 kHz, upward with the harmonics
+        float<2> res = x - recon * vg;
+        float<2> xa = vo.hd; float<2> xb = res; vo.hd = res;
+        xa = hilbertCell (xa, vo.hA.at (0), vo.hA.at (1), vo.hA.at (2), vo.hA.at (3), 0.47940086558884f);
+        xa = hilbertCell (xa, vo.hA.at (4), vo.hA.at (5), vo.hA.at (6), vo.hA.at (7), 0.87621849353931f);
+        xa = hilbertCell (xa, vo.hA.at (8), vo.hA.at (9), vo.hA.at (10), vo.hA.at (11), 0.97659758950819f);
+        xa = hilbertCell (xa, vo.hA.at (12), vo.hA.at (13), vo.hA.at (14), vo.hA.at (15), 0.99749925593555f);
+        xb = hilbertCell (xb, vo.hB.at (0), vo.hB.at (1), vo.hB.at (2), vo.hB.at (3), 0.16175849836770f);
+        xb = hilbertCell (xb, vo.hB.at (4), vo.hB.at (5), vo.hB.at (6), vo.hB.at (7), 0.73302893234149f);
+        xb = hilbertCell (xb, vo.hB.at (8), vo.hB.at (9), vo.hB.at (10), vo.hB.at (11), 0.94534970032911f);
+        xb = hilbertCell (xb, vo.hB.at (12), vo.hB.at (13), vo.hB.at (14), vo.hB.at (15), 0.99059915668453f);
+        vo.hsph += float64 (vo.hdHz) / float64 (srOut);
+        vo.hsph -= floor (vo.hsph);
+        float co = float (cos (twoPi * vo.hsph)); float si = float (sin (twoPi * vo.hsph));
+        float<2> resSh = xa * co + xb * si;
+        // with no shift the residual passes as is: the Hilbert pair would phase-shift it, and it exactly corrects what the
+        // bank captures badly (leakage between neighbouring harmonics) — measured: bank alone at s = 1, error −11 dB; with it, −118 dB
+        // the bank is transparent without shift, so it is fully wet (20 ms fade only when switching on and
+        // off) — a dry/shifted mix would make both beat (measured: −6.5 dB dip then ×2 peak)
+        vo.hws = clamp (vo.hws + vo.hwsS, 0.0f, 1.0f);
+        float wS = vo.hws;
+        float wStep = 1.0f / (0.02f * srOut);
+        vo.hwet = vo.gH > 0.001f ? min (1.0f, vo.hwet + wStep) : max (0.0f, vo.hwet - wStep);
+        return x * (1.0f - vo.hwet) + (synth + res * (1.0f - wS) + resSh * wS) * vo.hwet;
+    }
+
+    // ------------------------------------------------------------------ MASK
+    // The mummer's vowel (its formants, measured frame by frame):
+    //   pre = EQ1(x)            bells +15·g dB on F1 F2 F3 (the sound pushes its own vowel, as in Balance Stain)
+    //   stain = X(pre) − pre    what the folder creates, mostly in the pushed bands
+    //   refl = comb(stain)      the stain sings in a comb tuned to a scale degree (the crystal of Ripple Mirror);
+    //                           its length is pulled by a spring that the measured loudness rises push away
+    //   out = EQ2(pre + refl)   bells −15·g dB on the formants MIRRORED around a degree (opening m = g): at m = 0 EQ2 is
+    //                           the exact inverse of EQ1 and only the stain remains; as it opens, the vowel flips
+    void masqueReset (Voice& vo)
+    {
+        for (int q = 0; q < 12; ++q) vo.mb.at (q) = float<2> (0.0f);
+        for (int q = 0; q < 2048; ++q) vo.mcomb.at (q) = float<2> (0.0f);
+        for (int q = 0; q < 6; ++q) { vo.mpar.at (q * 3) = 0.01f; vo.mpar.at (q * 3 + 1) = 1.0f; vo.mpar.at (q * 3 + 2) = 0.0f; }
+        for (int q = 0; q < 18; ++q) vo.mparD.at (q) = 0.0f;
+        vo.mfx0 = 0.0; vo.mfx1 = 0.0; vo.mhI = 0;
+        for (int q = 0; q < 24; ++q) { vo.mhU.at (q) = float<2> (0.0f); vo.mhE.at (q) = float<2> (0.0f); vo.mhO.at (q) = float<2> (0.0f); vo.mhLE.at (q) = float<2> (0.0f); vo.mhLO.at (q) = float<2> (0.0f); }
+        vo.mxp = float<2> (0.0f); vo.mxf = 0.0f;
+        for (int q = 0; q < 4; ++q) vo.mcq.at (q) = float<2> (0.0f);
+        vo.mw = 0; vo.mtau = 0.0f; vo.mtauC = 0.0f; vo.mtauS = 0.0f; vo.mtv = 0.0f; vo.mfbc = 0.45f; vo.md = 0.0f; vo.mfbcD = 0.0f; vo.mdD = 0.0f; vo.mInit = false;
+    }
+    // (V6.1) each bell's parameters (frequency warp gw, damping kq, boost kk) glide SAMPLE BY SAMPLE towards the values set
+    // every 32 frames, and the filter's coefficients are recomputed from them at every sample — they jumped every 32
+    // frames (a zipper under a moving formant or a moving pad)
+    void bellCoefs (Voice& vo, int b, float gw, float Q, float A, bool first)
+    {
+        float kq = 1.0f / (Q * A);
+        float kk = kq * (A * A - 1.0f);
+        if (first)
+        {
+            vo.mpar.at (b * 3) = gw; vo.mpar.at (b * 3 + 1) = kq; vo.mpar.at (b * 3 + 2) = kk;
+            vo.mparD.at (b * 3) = 0.0f; vo.mparD.at (b * 3 + 1) = 0.0f; vo.mparD.at (b * 3 + 2) = 0.0f;
+        }
+        else
+        {
+            vo.mparD.at (b * 3) = (gw - vo.mpar.at (b * 3)) / float (CTRL);
+            vo.mparD.at (b * 3 + 1) = (kq - vo.mpar.at (b * 3 + 1)) / float (CTRL);
+            vo.mparD.at (b * 3 + 2) = (kk - vo.mpar.at (b * 3 + 2)) / float (CTRL);
+        }
+    }
+    float<2> bell (Voice& vo, int b, float<2> x)
+    {
+        float gw = vo.mpar.at (b * 3) + vo.mparD.at (b * 3); vo.mpar.at (b * 3) = gw;
+        float kq = vo.mpar.at (b * 3 + 1) + vo.mparD.at (b * 3 + 1); vo.mpar.at (b * 3 + 1) = kq;
+        float kk = vo.mpar.at (b * 3 + 2) + vo.mparD.at (b * 3 + 2); vo.mpar.at (b * 3 + 2) = kk;
+        float a1 = 1.0f / (1.0f + gw * (gw + kq)); float a2 = gw * a1; float a3 = gw * a2;
+        float<2> c1 = vo.mb.at (b * 2); float<2> c2 = vo.mb.at (b * 2 + 1);
+        float<2> v3 = x - c2;
+        float<2> v1 = c1 * a1 + v3 * a2;
+        float<2> v2 = c2 + c1 * a2 + v3 * a3;
+        vo.mb.at (b * 2) = v1 * 2.0f - c1; vo.mb.at (b * 2 + 1) = v2 * 2.0f - c2;
+        return x + v1 * kk;
+    }
+    void masqueControl (Voice& vo, int k, int j0, float u, float f0e)
+    {
+        float sr = srOut;
+        float g = vo.gM;
+        bool first = ! vo.mInit;
+        float[3] F;
+        for (int q = 0; q < 3; ++q) F.at (q) = clamp (aFormant (k, j0, q) * (1.0f - u) + aFormant (k, j0 + 1, q) * u, 60.0f, 0.45f * sr);
+        float ax = snapHz (float (sqrt (F.at (0) * F.at (1))));
+        float A = float (pow (10.0f, 15.0f * g / 40.0f));
+        float m = g;
+        for (int q = 0; q < 3; ++q)
+        {
+            float Q = q == 0 ? 3.0f : (q == 1 ? 5.0f : 7.0f);
+            float fm = F.at (q) * float (pow (ax / F.at (q), 2.0f * m));
+            float gF = float (tan (float (pi) * min (0.45f * sr, F.at (q)) / sr));
+            float gM2 = float (tan (float (pi) * min (0.45f * sr, max (40.0f, fm)) / sr));
+            bellCoefs (vo, q, gF, Q, A, first);
+            bellCoefs (vo, 3 + q, gM2, Q, 1.0f / A, first);
+        }
+        if (first) { vo.md = g; vo.mfbc = 0.45f + 0.4f * g; vo.mdD = 0.0f; vo.mfbcD = 0.0f; }
+        else { vo.mdD = (g - vo.md) / float (CTRL); vo.mfbcD = (0.45f + 0.4f * g - vo.mfbc) / float (CTRL); }
+        // comb tuned to the degree nearest the pitch (folded into 100–1600 Hz), length pulled by a spring
+        float fd = snapHz (f0e);
+        for (int q = 0; q < 8 && fd < 100.0f; ++q) fd *= 2.0f;
+        for (int q = 0; q < 8 && fd > 1600.0f; ++q) fd *= 0.5f;
+        float tauT = sr / fd;
+        if (! vo.mInit) { vo.mtau = tauT; vo.mtauC = tauT; vo.mtv = 0.0f; vo.loudPrev = aLoud (k, j0); vo.mInit = true; }
+        float loud = aLoud (k, j0);
+        float flux = max (0.0f, loud - vo.loudPrev); vo.loudPrev = loud;
+        float w0 = float (twoPi) * 2.5f * float (CTRL) / sr;
+        vo.mtv += w0 * w0 * (tauT - vo.mtauC) - 2.0f * 0.3f * w0 * vo.mtv + 0.02f * flux * tauT * g;
+        vo.mtv = clamp (vo.mtv, -0.16f * float (CTRL), 0.16f * float (CTRL));      // bounded speed (±0.16 samples/sample)
+        vo.mtauC = clamp (vo.mtauC + vo.mtv, 8.0f, 2044.0f);
+        vo.mtauS = (vo.mtauC - vo.mtau) / float (CTRL);
+    }
+    // (V6.5) what the folder adds to its linear part, in v = gin·x: N(v) = kf·sin(π/2·clamp(v, ±4)) − cl·v, and its
+    // antiderivative G(v) = −kf·(2/π)·cos(π/2·clamp(v)) − cl·v²/2 (the cosine constant beyond the clamp, where sin is 0);
+    // first-order ADAA: (G(v) − G(v1)) / (v − v1), N at the midpoint when the two are too close
+    float64 foldN (float64 v, float64 v1, float64 kf, float64 cl)
+    {
+        float64 dd = v - v1;
+        if (abs (dd) < 1.0e-6) { float64 m = 0.5 * (v + v1); return kf * sin (1.5707963267949 * clamp (m, -4.0, 4.0)) - cl * m; }
+        float64 c0 = clamp (v, -4.0, 4.0), c1 = clamp (v1, -4.0, 4.0);
+        float64 g0 = -kf * 0.63661977236758 * cos (1.5707963267949 * c0) - 0.5 * cl * v * v;
+        float64 g1 = -kf * 0.63661977236758 * cos (1.5707963267949 * c1) - 0.5 * cl * v1 * v1;
+        return (g0 - g1) / dd;
+    }
+    float<2> masqueSample (Voice& vo, float<2> x, bool on)
+    {
+        float<2> pre = bell (vo, 2, bell (vo, 1, bell (vo, 0, x)));
+        vo.md += vo.mdD; vo.mfbc += vo.mfbcD;
+        float d = vo.md;
+        float gin = 1.0f + 4.0f * d;
+        // (V6.5) the folder sin(π/2·x) (corners at ±4), driven up to ×5 after the +15 dB bells, had no anti-aliasing: the folded
+        // harmonics far above Nyquist came back into the band and the comb recirculated them. It now runs at twice the rate
+        // (Phalène's 47-tap halfband, polyphase) with first-order ADAA in float64 — measured on the folder alone (sine 3.1 kHz,
+        // drive ×12: energy off the harmonics −15.5 dB → −50.3 dB; 6.2 kHz, ×5: −16.1 → −114 dB). The filters and the ADAA
+        // delay what the folder adds by 23.25 samples: the bells' output (the dry part of the stain and of the sum) takes the
+        // same chain, so the stain keeps its exact relation to the sound. The ADAA is a mean over half a sample, a gentle
+        // low-pass (−0.47 dB at 10 kHz, −1.9 at 19 kHz): five symmetric taps on the sum restore it (±0.06 dB up to 18 kHz).
+        // MASK as a whole sounds 25.25 samples later (0.53 ms at 48 kHz) and fades in and out over 10 ms against the dry sound
+        float64 kf = float64 (2.0f * d / gin), cl = float64 (float (pi) * d / gin);
+        int hi = vo.mhI;
+        vo.mhU.at (hi) = pre;
+        float<2> xe = float<2> (0.0f);
+        for (int q = 0; q < 24; ++q) xe += vo.mhU.at ((hi - q + 24) % 24) * HB47.at (q);
+        float<2> xo = vo.mhU.at ((hi - 11 + 24) % 24);
+        float64 e0 = foldN (float64 (xe[0] * gin), vo.mfx0, kf, cl); vo.mfx0 = float64 (xe[0] * gin);
+        float64 e1 = foldN (float64 (xe[1] * gin), vo.mfx1, kf, cl); vo.mfx1 = float64 (xe[1] * gin);
+        float64 o0 = foldN (float64 (xo[0] * gin), vo.mfx0, kf, cl); vo.mfx0 = float64 (xo[0] * gin);
+        float64 o1 = foldN (float64 (xo[1] * gin), vo.mfx1, kf, cl); vo.mfx1 = float64 (xo[1] * gin);
+        vo.mhE.at (hi) = float<2> (float (e0), float (e1)); vo.mhO.at (hi) = float<2> (float (o0), float (o1));
+        vo.mhLE.at (hi) = (xe + vo.mxp) * 0.5f; vo.mhLO.at (hi) = (xo + xe) * 0.5f; vo.mxp = xo;
+        float<2> nz = vo.mhO.at ((hi - 12 + 24) % 24) * 0.5f;
+        float<2> preD = vo.mhLO.at ((hi - 12 + 24) % 24) * 0.5f;
+        for (int q = 0; q < 24; ++q)
+        {
+            float hq = 0.5f * HB47.at (q); int iq = (hi - q + 24) % 24;
+            nz += vo.mhE.at (iq) * hq; preD += vo.mhLE.at (iq) * hq;
+        }
+        vo.mhI = (hi + 1) % 24;
+        float<2> stain = preD * ((float (pi) - 1.0f) * d) + nz;
+        vo.mtau += vo.mtauS;
+        float rp = float (vo.mw) - vo.mtau;
+        if (rp < 0.0f) rp += 2048.0f;
+        int ri = int (rp); float fr = rp - float (ri);
+        // (V6.5) 4-point Hermite (it was linear: a moving fraction made a moving low-pass inside a loop fed back up to 0.85)
+        float<2> back = hermite (vo.mcomb.at ((ri - 1) & 2047), vo.mcomb.at (ri & 2047), vo.mcomb.at ((ri + 1) & 2047), vo.mcomb.at ((ri + 2) & 2047), fr);
+        float<2> refl = stain + back * vo.mfbc;
+        vo.mcomb.at (vo.mw) = refl; vo.mw = (vo.mw + 1) & 2047;
+        float<2> y = preD + refl * ((1.0f - vo.mfbc) * 1.5f);
+        float<2> yc = y * 0.012597f + vo.mcq.at (0) * -0.067001f + vo.mcq.at (1) * 1.10881f + vo.mcq.at (2) * -0.067001f + vo.mcq.at (3) * 0.012597f;
+        vo.mcq.at (3) = vo.mcq.at (2); vo.mcq.at (2) = vo.mcq.at (1); vo.mcq.at (1) = vo.mcq.at (0); vo.mcq.at (0) = y;
+        float<2> out = bell (vo, 5, bell (vo, 4, bell (vo, 3, yc)));
+        // switched on or off, MASK crosses with the dry sound in 10 ms (its 23 samples of delay would otherwise click)
+        float st = 1.0f / (0.01f * srOut);
+        vo.mxf = on ? min (1.0f, vo.mxf + st) : max (0.0f, vo.mxf - st);
+        return x + (out - x) * vo.mxf;
+    }
+
+    // ------------------------------------------------------------------ BODY
+    // Three looped waveguides (X, Y, Z) mixed by a lossless 3×3 rotation (Euler angles, as in Cavity): X on the
+    // scale degree nearest the pitch (as transposed by FLESH), Y and Z on the next two degrees,
+    // folded into 30–2000 Hz; lengths glide in 30 ms; low-pass and soft saturation in the loop; the rotation
+    // turns with g and gets a kick at every GESTURE mark; T60 from 0.05 to 3 s.
+    void corpsReset (Voice& vo)
+    {
+        for (int q = 0; q < 2048; ++q) { vo.cx.at (q) = 0.0f; vo.cy.at (q) = 0.0f; vo.cz.at (q) = 0.0f; }
+        for (int q = 0; q < 3; ++q) { vo.cLs.at (q) = 0.0f; vo.cLst.at (q) = 0.0f; vo.clp.at (q) = 0.0f; }
+        for (int q = 0; q < 9; ++q) vo.cR.at (q) = (q == 0 || q == 4 || q == 8) ? 1.0f : 0.0f;
+        vo.cw = 0; vo.cal = 0.0f; vo.cbe = 0.0f; vo.cga = 0.0f; vo.cvel = 0.0f; vo.cfb = 0.0f; vo.cin = 0.0f; vo.cdamp = 0.5f; vo.cInit = false;
+        for (int q = 0; q < 9; ++q) vo.cRd.at (q) = 0.0f;
+        for (int q = 0; q < 3; ++q) { vo.cP.at (q) = 0.0f; vo.cPd.at (q) = 0.0f; }
+        vo.cA = 0.0f; vo.cInitR = false; vo.cGl = false; vo.cfbD = 0.0f; vo.cinD = 0.0f; vo.cdampD = 0.0f; vo.cRamp = 0.0f;
+    }
+    // V6.1 — BODY made audible (measured on the JS port of this engine: at full BODY the sound moved 13 dB from the dry one,
+    // its spectrum by less than 1 dB — inaudible). Four causes, four fixes:
+    //   1. the tubes followed the instantaneous pitch (42 → 665 Hz in 0.1 s on a breathy mummer): retuned without rest, they
+    //      never rang — tube X now sits on the mummer's NOTE (its reference pitch, moved by FLESH), Y and Z on the next two
+    //      degrees of the scale; a body has its own modes, the melody passes through them;
+    //   2. the loop's low-pass delayed each tube by its phase delay (2.6 samples at 168 Hz: 16 c off a resonance 0.7 Hz wide)
+    //      — removed from the length;
+    //   3. the rotation turned all the way and poured each tube into the two others every round trip (no tuned comb left:
+    //      a harmonic tone resonated 25 dB below itself) — it now oscillates around identity (±0.06…0.18 rad, more on a
+    //      GESTURE kick, smoothed over 60 ms): coupled strings that exchange a little; the PAN of each tube turns;
+    //   4. the injection is normalised in power (a white noise comes out at its own level, concentrated on the tube's peaks)
+    //      instead of in peak gain — the energy of a real mummer mostly falls between narrow peaks.
+    // Saturation only above 0.7 (its curve took 5 % of loop gain per round trip), every coefficient glides sample by sample,
+    // the input opens in 10 ms. Measured (JS port, 6 mummers, 3 subjects): 12–15 dB from the dry sound at 0.3, 0 to +3 dB at
+    // full (the resonated sound itself), level kept within ±3.4 dB, no clicks (two before the opening ramp).
+    void corpsControl (Voice& vo, float f0n)
+    {
+        float sr = srOut;
+        float g = vo.gC;
+        int i0 = nearestIdx (centsAbs (f0n));
+        float a = 1.0f - float (exp (-float (twoPi) * (3200.0f + 6000.0f * (1.0f - g)) / sr));
+        float b = 1.0f - a;
+        float Lm = 0.0f;
+        for (int q = 0; q < 3; ++q)
+        {
+            float f = q == 0 ? f0n : hzOfCents (degCents (i0 + q));
+            for (int r = 0; r < 12 && f > 2000.0f; ++r) f *= 0.5f;
+            for (int r = 0; r < 12 && f < 30.0f; ++r) f *= 2.0f;
+            float w = float (twoPi) * f / sr;
+            float tau = float (atan2 (b * sin (w), 1.0f - b * cos (w))) / w;
+            float Lt = clamp (sr / f - tau, 4.0f, 2040.0f);
+            float cur = vo.cLs.at (q);
+            float nxt = vo.cInit ? cur + (Lt - cur) * kGl30 : Lt;
+            if (! vo.cInit) vo.cLs.at (q) = Lt;
+            vo.cLst.at (q) = (nxt - vo.cLs.at (q)) / float (CTRL);
+            Lm += nxt;
+        }
+        vo.cInit = true;
+        Lm /= 3.0f;
+        float T60 = 0.05f + 1.55f * g * g;
+        float cfbT = float (pow (10.0f, -3.0f * Lm / (sr * T60)));
+        float wm = float (twoPi) / max (4.0f, Lm);
+        float H = a / float (sqrt (1.0f - 2.0f * b * cos (wm) + b * b));
+        float G = min (0.9995f, cfbT * H);
+        float cinT = 0.5f * float (sqrt (1.0f - G * G));
+        if (! vo.cGl) { vo.cfb = cfbT; vo.cin = cinT; vo.cdamp = a; vo.cGl = true; }
+        vo.cfbD = (cfbT - vo.cfb) / float (CTRL); vo.cinD = (cinT - vo.cin) / float (CTRL); vo.cdampD = (a - vo.cdamp) / float (CTRL);
+        if (vo.markHit) vo.cvel += 0.15f * g;                   // a GESTURE mark kicks the field
+        vo.cvel *= kVel;
+        float omega = float (twoPi) * g * (0.05f + 0.6f * g) / sr;
+        float rate = (omega + vo.cvel / sr * 50.0f) * float (CTRL);
+        vo.cal += rate; vo.cbe += 0.73f * rate; vo.cga += 0.41f * rate;
+        if (vo.cal > float (twoPi)) vo.cal -= float (twoPi);
+        if (vo.cbe > float (twoPi)) vo.cbe -= float (twoPi);
+        if (vo.cga > float (twoPi)) vo.cga -= float (twoPi);
+        vo.cA += (0.06f + 0.12f * g + min (0.4f, abs (vo.cvel) * 0.5f) - vo.cA) * kGl60;
+        float al = vo.cA * float (sin (vo.cal)); float be = vo.cA * float (sin (vo.cbe)); float ga = vo.cA * float (sin (vo.cga));
+        float ca = float (cos (al)); float sa = float (sin (al));
+        float cb = float (cos (be)); float sb = float (sin (be));
+        float cg = float (cos (ga)); float sg = float (sin (ga));
+        // R = Rzx(γ) · Ryz(β) · Rxy(α), reached sample by sample
+        float[9] Rt;
+        Rt.at (0) = cg * ca + sg * sb * sa; Rt.at (1) = -cg * sa + sg * sb * ca; Rt.at (2) = sg * cb;
+        Rt.at (3) = cb * sa;                Rt.at (4) = cb * ca;                 Rt.at (5) = -sb;
+        Rt.at (6) = -sg * ca + cg * sb * sa; Rt.at (7) = sg * sa + cg * sb * ca; Rt.at (8) = cg * cb;
+        if (! vo.cInitR) { for (int q = 0; q < 9; ++q) { vo.cR.at (q) = Rt.at (q); vo.cRd.at (q) = 0.0f; } vo.cInitR = true; }
+        else for (int q = 0; q < 9; ++q) vo.cRd.at (q) = (Rt.at (q) - vo.cR.at (q)) / float (CTRL);
+        float p0 = 0.4f * float (sin (vo.cal)); float p1 = 0.4f * float (sin (vo.cbe + 2.1f)); float p2 = 0.4f * float (sin (vo.cga + 4.2f));
+        vo.cPd.at (0) = (p0 - vo.cP.at (0)) / float (CTRL); vo.cPd.at (1) = (p1 - vo.cP.at (1)) / float (CTRL); vo.cPd.at (2) = (p2 - vo.cP.at (2)) / float (CTRL);
+    }
+    float corpsTap (Voice& vo, int q)
+    {
+        vo.cLs.at (q) = vo.cLs.at (q) + vo.cLst.at (q);
+        float rp = float (vo.cw) - vo.cLs.at (q);
+        if (rp < 0.0f) rp += 2048.0f;
+        int ri = int (rp); float fr = rp - float (ri);
+        int im = (ri - 1) & 2047; int i0 = ri & 2047; int i1 = (ri + 1) & 2047; int i2 = (ri + 2) & 2047;
+        // (V6.5) 4-point Hermite (it was linear: each tube's high-frequency decay depended on its fractional length, and changed
+        // while the length glided)
+        float am = 0.0f; float a = 0.0f; float b = 0.0f; float c = 0.0f;
+        if (q == 0) { am = vo.cx.at (im); a = vo.cx.at (i0); b = vo.cx.at (i1); c = vo.cx.at (i2); }
+        else if (q == 1) { am = vo.cy.at (im); a = vo.cy.at (i0); b = vo.cy.at (i1); c = vo.cy.at (i2); }
+        else { am = vo.cz.at (im); a = vo.cz.at (i0); b = vo.cz.at (i1); c = vo.cz.at (i2); }
+        float s = hermite1 (am, a, b, c, fr);
+        float l = vo.clp.at (q) + (s - vo.clp.at (q)) * vo.cdamp;
+        vo.clp.at (q) = l;
+        float al = abs (l);                                    // soft saturation, above 0.7 only
+        if (al <= 0.7f) return l;
+        float k = 0.7f + (al - 0.7f) / (1.0f + (al - 0.7f) / 0.3f);
+        return l < 0.0f ? -k : k;
+    }
+    float<2> corpsSample (Voice& vo, float<2> x, float g)
+    {
+        vo.cRamp = min (1.0f, vo.cRamp + 100.0f / srOut);       // the tubes' input opens in 10 ms
+        float vm = 0.5f * (x[0] + x[1]) * vo.cRamp;
+        float y0 = corpsTap (vo, 0); float y1 = corpsTap (vo, 1); float y2 = corpsTap (vo, 2);
+        float u0 = vo.cin * vm + vo.cfb * y0; float u1 = vo.cin * vm + vo.cfb * y1; float u2 = vo.cin * vm + vo.cfb * y2;
+        int w = vo.cw;
+        vo.cx.at (w) = vo.cR.at (0) * u0 + vo.cR.at (1) * u1 + vo.cR.at (2) * u2;
+        vo.cy.at (w) = vo.cR.at (3) * u0 + vo.cR.at (4) * u1 + vo.cR.at (5) * u2;
+        vo.cz.at (w) = vo.cR.at (6) * u0 + vo.cR.at (7) * u1 + vo.cR.at (8) * u2;
+        vo.cw = (w + 1) & 2047;
+        for (int q = 0; q < 9; ++q) vo.cR.at (q) = vo.cR.at (q) + vo.cRd.at (q);
+        vo.cfb += vo.cfbD; vo.cin += vo.cinD; vo.cdamp += vo.cdampD;
+        for (int q = 0; q < 3; ++q) vo.cP.at (q) = vo.cP.at (q) + vo.cPd.at (q);
+        float p0 = vo.cP.at (0); float p1 = vo.cP.at (1); float p2 = vo.cP.at (2);
+        float wl = y0 * (0.5f + p0) + y1 * (0.5f + p1) + y2 * (0.5f + p2);
+        float wr = y0 * (0.5f - p0) + y1 * (0.5f - p1) + y2 * (0.5f - p2);
+        return x * (1.0f - 0.65f * g) + float<2> (wl, wr) * (2.4f * g);
+    }
+
+    // ------------------------------------------------------------------ LACQUER (V6.3, timbre CREATED in V6.4)
+    // Mat (V6.3): "each phase of the partials must be in phase with each oscillator of Moonvox"; (V6.4): "I meant Moonvox's
+    // power to recreate a complex sound: I'd like the analysis to CREATE a timbre, the way I create one with Moonvox, and add
+    // it to the mummer as you already do". The brain (laque.js designMoonvox) builds, from the subject, a Moonvox of its own:
+    // 48 oscillators whose levels are solved exactly against the subject's profile through Moonvox's oboe and brass shapers, at
+    // the operating point (oboe, brass, balance, tilt) where its circulation moves the most; its circulation (calcinatio,
+    // coagulatio, sublimatio scaled to the subject's own timbre motion) is sampled over one turn: 32 instants × 24 partials.
+    // Every 128 frames (control), for each harmonic k of the note (k·f0 < 0.45·sr, k ≤ 24), demodulated on the middle (L+R)/2
+    // by carriers e^{ikΘ} (Θ following the measured pitch) and two poles at min (0.25·f0, 150 Hz):
+    //   the circulation's phase advances at the subject's measured rate, the pad's Lorenz attractor (σ 10 ± 4, ρ 32.95, β 8/3,
+    //   1.2 units/s, mixed 3:1 with a 0.2 Hz cycle) pushes it ±0.15 turn and shifts the subject's formants (±30 % × sublimatio);
+    //   the created timbre's motion M_k = 10^((R_k(turn) − R̄_k)/20) × (1 + its partial's life (rate and depth measured on the
+    //   subject's partials) × sin) × four group LFOs (±5 %) × the formant shift;
+    //   TOUCHES: three brushes (0.7-octave gaussians over the ranks) walked over ranks 1–16 by the attractor's x, y, z;
+    //   T_k = 0.3 + 0.7 × the nearest brush;
+    //   gain G_k = 10^(T·R̄_k/20) · M_k^(2T) (R̄_k: the created timbre against the subject, ±12 dB), bounded to ±18 dB,
+    //   the note's energy kept;
+    //   phase: the partial's own (a real gain) where it is clear; where it is weak (ρ_k = a_k / (a_k + κE), κ −40 dB) the
+    //   phase the subject gives it: u₁^k × its relative phase, tracked over 50 ms while it was clear (the brain's mean at the
+    //   start of the voice); no prediction when the fundamental is 20 dB under the note;
+    //   odd partials to the left, even to the right (±0.25·T, square-root law).
+    // The middle gets Σ (g_k·p_k + c_k − p_k), each side its place: L += Σ (l_k·e_k − p_k), R += Σ (r_k·e_k − p_k), × dry/wet.
+    // JS port and measures: brain/laque.js (lacquerJS).
+    void lacquerReset (Voice& vo, int pq)
+    {
+        for (int q = 0; q < 24; ++q)
+        {
+            vo.lI1.at (q) = 0.0f; vo.lI2.at (q) = 0.0f; vo.lQ1.at (q) = 0.0f; vo.lQ2.at (q) = 0.0f;
+            vo.lg.at (q) = 1.0f; vo.lgS.at (q) = 0.0f; vo.lcm.at (q) = 0.0f; vo.lcmS.at (q) = 0.0f; vo.lur.at (q) = 1.0f; vo.lui.at (q) = 0.0f; vo.lrc.at (q) = 1.0f; vo.lrs.at (q) = 0.0f;
+            vo.lpl.at (q) = 1.0f; vo.lplS.at (q) = 0.0f; vo.lpr.at (q) = 1.0f; vo.lprS.at (q) = 0.0f; vo.lWarm.at (q) = 2;
+            vo.lDr.at (q) = 0.0f; vo.lDi.at (q) = 0.0f;
+        }
+        int k = max (0, vo.child);
+        for (int q = 0; q < 24; ++q) { vo.lDr.at (q) = 0.1f * lqDc.at (k * 24 + q); vo.lDi.at (q) = 0.1f * lqDs.at (k * 24 + q); }
+        vo.lth = 0.0; vo.ldth = float64 (twoPi) * 100.0 / float64 (srOut); vo.llp = 0.0f; vo.lK = 0; vo.lKt = 0; vo.lCtl = 0;
+        vo.lx = pLx.at (pq); vo.ly = pLy.at (pq); vo.lz = pLz.at (pq); vo.lsph = pLs.at (pq); vo.lt = pLt.at (pq);
+        for (int q = 0; q < 24; ++q) vo.lph.at (q) = pPh.at (pq * 24 + q);
+        vo.lcs[0] = -100.0f; vo.lcs[1] = -100.0f; vo.lcs[2] = -100.0f;
+        vo.lcph = pCph.at (pq);
+        vo.lqOn = true;
+    }
+    // (V6.6) the division or multiple of the pulse nearest a rate (x = rate / pulse): a quarter, a third, a half, two thirds,
+    // three quarters, one, four thirds, three halves, two, three, four, six or eight beats per beat
+    float tempoMult (float x)
+    {
+        float lx = float (log (max (x, 1.0e-3f)));
+        float best = 1.0f; float bd = 1.0e9f;
+        for (int i = 0; i < 13; ++i)
+        {
+            float m = i == 0 ? 0.25f : (i == 1 ? 0.333333f : (i == 2 ? 0.5f : (i == 3 ? 0.666667f : (i == 4 ? 0.75f : (i == 5 ? 1.0f : (i == 6 ? 1.333333f : (i == 7 ? 1.5f : (i == 8 ? 2.0f : (i == 9 ? 3.0f : (i == 10 ? 4.0f : (i == 11 ? 6.0f : 8.0f)))))))))));
+            float d = abs (float (log (m)) - lx);
+            if (d < bd) { bd = d; best = m; }
+        }
+        return best;
+    }
+    void lacquerControl (Voice& vo, int k, float f0, int pq)
+    {
+        vo.lCtl -= 1;
+        if (vo.lCtl > 0) return;
+        vo.lCtl = 4;
+        let B = 128;
+        float sr = srOut;
+        bool on = lqOk.at (k) && f0 > 30.0f && f0 < 2000.0f;
+        int nK = on ? clamp (int (0.45f * sr / f0), 1, 24) : 0;
+        int Kp = vo.lKt;
+        int K = max (nK, Kp);                                 // partials leaving the bank finish gliding to identity
+        for (int q = Kp; q < nK; ++q) { vo.lI1.at (q) = 0.0f; vo.lI2.at (q) = 0.0f; vo.lQ1.at (q) = 0.0f; vo.lQ2.at (q) = 0.0f; vo.lWarm.at (q) = 2; }
+        vo.lK = K; vo.lKt = nK;
+        if (on)
+        {
+            vo.ldth = float64 (twoPi) * float64 (f0) / float64 (sr);
+            vo.llp = 1.0f - float (exp (-float (twoPi) * min (0.25f * f0, 150.0f) / sr));
+        }
+        // the attractor (one step per control), its state kept by the pad
+        // (V6.6) with a pulse, the attractor (and all it moves: the brushes, the formants, the push of the circulation) runs at a
+        // speed in proportion to it — unchanged at 120 BPM, half as fast at 60, twice at 240 (bounded)
+        float spd = lmBeat > 0.0f ? clamp (0.5f * lmBeat, 0.5f, 2.0f) : 1.0f;
+        float64 h = 1.2 * float64 (spd) * float64 (B) / float64 (sr);
+        vo.lsph += 0.007 * h * 0.75;
+        float64 sig = 10.0 + 4.0 * sin (vo.lsph);
+        float64 dx = sig * (vo.ly - vo.lx); float64 dy = vo.lx * (32.95 - vo.lz) - vo.ly; float64 dz = vo.lx * vo.ly - 2.6667 * vo.lz;
+        vo.lx += h * dx; vo.ly += h * dy; vo.lz += h * dz;
+        if (! (abs (vo.lx) < 100.0 && abs (vo.ly) < 150.0 && vo.lz > -10.0 && vo.lz < 200.0)) { vo.lx = 0.1; vo.ly = 0.0; vo.lz = 2.0; }
+        vo.lt += float (B) / sr;
+        if (vo.lt > 3600.0f) vo.lt -= 3600.0f;
+        pLx.at (pq) = vo.lx; pLy.at (pq) = vo.ly; pLz.at (pq) = vo.lz; pLs.at (pq) = vo.lsph; pLt.at (pq) = vo.lt;
+        float t = vo.lt;
+        float cyc = float (twoPi) * (lmBeat > 0.0f ? 0.125f * lmBeat : 0.2f) * t;      // (V6.6) with a pulse, one cycle in two bars of four
+        float xN = 0.1875f * float (sin (cyc)) + 0.75f * float (tanh (float (vo.lx) * 0.08f));
+        float yN = 0.1875f * float (cos (cyc)) + 0.75f * float (tanh (float (vo.ly) * 0.06f));
+        float zN = 0.1875f * float (sin (2.0f * cyc)) + 0.75f * float (tanh ((float (vo.lz) - 25.0f) * 0.06f));
+        float invB = 1.0f / float (B);
+        if (! on)
+        {
+            for (int q = 0; q < K; ++q)
+            {
+                vo.lgS.at (q) = (1.0f - vo.lg.at (q)) * invB; vo.lcmS.at (q) = -vo.lcm.at (q) * invB; vo.lrc.at (q) = 1.0f; vo.lrs.at (q) = 0.0f;
+                vo.lplS.at (q) = (1.0f - vo.lpl.at (q)) * invB; vo.lprS.at (q) = (1.0f - vo.lpr.at (q)) * invB;
+            }
+            return;
+        }
+        // (V6.4) the Moonvox timbre CREATED from the subject: its circulation turns at the measured rate, the attractor pushes it
+        // (±0.15 turn); the formants move like Moonvox's (±30 % at full course × sublimatio); each partial lives at its own rate
+        // (V6.6) TEMPO, INDEX, HUMANISED — Mat: « la modulation dans la laque est toujours la même … si le sample montre une
+        // périodicité dans sa morphologie, le rate doit dépendre du tempo relevé sur le sample … avec parcimonie dans son index
+        // … organique, pas strictement sync, humaniser ». Measured in this engine (trompette, lacquer 100 %, held note): the
+        // lacquer added 3.9 dB of timbre motion per 50 ms — its partials' life 3.7 dB (rates held at 1.5 or 6 Hz and depths at
+        // ±30–60 % whatever the subject: always the same), the formants' glide 1.6 dB, the circulation 0.08 dB. Now
+        //   • the INDEX: every motion of a partial (its life, the circulation, the group LFOs, the formants' glide) × lmScale in
+        //     dB, sent by the interface so that the lacquered partials live as much as the subject's own notes (its amplitude
+        //     life, 0.5 to 3 dB rms: ×0.24 on the trumpet, ×0.15 on a steady saw); the COLOUR STAYS (the power the swings gave
+        //     each partial on average is put back, partial by partial: the touched ones keep their lift); the touches (where
+        //     the colour is laid) keep their slow walk, their quick turns × lmScale (they moved each partial by up to ±8 dB at
+        //     1–2 Hz: most of what stayed of the motion on a steady saw at ×0.15 without it), the places follow them;
+        //   • the TEMPO, when the subject's morphology has a pulse: each partial's life on the nearest of the pulse's divisions
+        //     and multiples (a quarter to eight beats, triplets included), the circulation one turn in 1, 2, 4 … 64 beats
+        //     (nearest its measured rate), the attractor at a speed in proportion to the pulse; without a pulse, the rates measured;
+        //   • HUMANISED: each rate drifts ±2.5 % with the pad's attractor, each partial along its own direction; the phases run
+        //     free (in tempo, never on the grid)
+        float dT = float (B) / sr;
+        {
+            float rc = lqRateT.at (k);
+            vo.lcph += float64 (rc * (1.0f + 0.025f * (0.8f * xN + 0.6f * zN)) * dT);
+            vo.lcph -= floor (vo.lcph);
+            pCph.at (pq) = vo.lcph;
+        }
+        float cyf = float (vo.lcph) + 0.15f * xN;
+        cyf -= floor (cyf);
+        float qf = cyf * 32.0f;
+        int q0 = clamp (int (floor (qf)), 0, 31); int q1 = (q0 + 1) % 32; float uq = qf - float (q0);
+        float fsh = float (pow (2.0f, 0.38f * zN * lqSubl.at (k)));
+        // the note's partials and energy
+        float E2 = 0.0f;
+        for (int q = 0; q < nK; ++q) E2 += vo.lI2.at (q) * vo.lI2.at (q) + vo.lQ2.at (q) * vo.lQ2.at (q);
+        float E = float (sqrt (E2));
+        float c0 = 2.0f + 1.9f * xN; float c1 = 2.0f + 1.9f * yN; float c2 = 2.0f + 1.9f * zN;
+        // (V6.6) the touches' walk: its slow part kept (one-pole over two beats, 1 s without a pulse), its quick part (the
+        // attractor's 1–2 Hz turns) × lmScale — the colour still travels over the partials, without shaking them
+        if (lmScale < 0.999f)
+        {
+            float kb = 1.0f - float (exp (-dT * (lmBeat > 0.0f ? 0.5f * lmBeat : 1.0f)));
+            if (vo.lcs[0] < -50.0f) { vo.lcs[0] = c0; vo.lcs[1] = c1; vo.lcs[2] = c2; }
+            vo.lcs[0] += (c0 - vo.lcs[0]) * kb; vo.lcs[1] += (c1 - vo.lcs[1]) * kb; vo.lcs[2] += (c2 - vo.lcs[2]) * kb;
+            c0 = vo.lcs[0] + lmScale * (c0 - vo.lcs[0]); c1 = vo.lcs[1] + lmScale * (c1 - vo.lcs[1]); c2 = vo.lcs[2] + lmScale * (c2 - vo.lcs[2]);
+        }
+        float[24] G; float[24] T; float eb = 0.0f;
+        for (int q = 0; q < nK; ++q)
+        {
+            float kk = float (q + 1);
+            float fk = kk * 0.618034f; fk -= floor (fk);
+            float rq = lqLRt.at (k * 24 + q);
+            float hq = 0.025f * (lhC.at (q) * xN + lhS.at (q) * yN);
+            vo.lph.at (q) = vo.lph.at (q) + rq * (1.0f + hq) * dT;
+            vo.lph.at (q) = vo.lph.at (q) - float (floor (vo.lph.at (q)));
+            pPh.at (pq * 24 + q) = vo.lph.at (q);
+            float ph = float (twoPi) * (vo.lph.at (q) + fk);
+            float gp = float (twoPi) * t * spd * ((q % 4) == 0 ? 0.05f : ((q % 4) == 1 ? 0.08f : ((q % 4) == 2 ? 0.11f : 0.14f)));
+            float fm = 1.0f;
+            for (int i = 0; i < 3; ++i)
+            {
+                float Fi = lqF.at (k * 3 + i);
+                if (Fi > 0.0f)
+                {
+                    float x = kk * f0 / Fi;
+                    float xs = x / fsh;
+                    float a1 = (xs - 1.0f / xs); float a0 = (x - 1.0f / x);
+                    fm *= float (sqrt ((1.0f + 16.0f * a0 * a0) / (1.0f + 16.0f * a1 * a1)));
+                }
+            }
+            float rb = lqRbar.at (k * 24 + q);
+            float Rm = lqTab.at (k * 768 + q0 * 24 + q) * (1.0f - uq) + lqTab.at (k * 768 + q1 * 24 + q) * uq - rb;
+            float M = float (pow (10.0f, Rm * 0.05f)) * (1.0f + lqLD.at (k * 24 + q) * float (sin (ph))) * (1.0f + 0.05f * float (sin (gp))) * clamp (fm, 0.35f, 2.8f);
+            float lr2 = float (log (kk)) * 1.442695f;
+            float d0 = (lr2 - c0) / 0.7f; float d1 = (lr2 - c1) / 0.7f; float d2 = (lr2 - c2) / 0.7f;
+            float tq = max (float (exp (-0.5f * d0 * d0)), max (float (exp (-0.5f * d1 * d1)), float (exp (-0.5f * d2 * d2))));
+            tq = 0.3f + 0.7f * tq;
+            T.at (q) = tq;                                    // the places (odd left, even right) wander with the touches
+            // (V6.6) the index: the motion M (life, circulation, group LFOs, formants) raised to lmScale — its dB × lmScale —, and
+            // the power its swings gave the partial on average put back (e^(½(0.23·e)²σ²), e = 2·tq, σ² the motion's variance
+            // in dB²: Gaussian approximation), so the colour stays when the motion calms down (measured on a saw at ×0.15, the
+            // motions scaled alone: partials 3–6 coloured +0.5 to +2.7 dB instead of +9 to +19 — the colour came largely from
+            // the motion's average)
+            float e2 = 2.0f * tq;
+            float comp = lmScale < 0.999f ? 0.1152f * e2 * e2 * lqVar.at (k * 24 + q) * (1.0f - lmScale * lmScale) : 0.0f;
+            float g = float (pow (10.0f, (tq * rb + min (comp, 12.0f)) * 0.05f)) * float (pow (max (1e-6f, M), e2 * lmScale));
+            g = clamp (g, 0.126f, 7.94f);
+            G.at (q) = g;
+            float a = float (sqrt (vo.lI2.at (q) * vo.lI2.at (q) + vo.lQ2.at (q) * vo.lQ2.at (q)));
+            eb += a * a * g * g;
+        }
+        float sc = eb > 1e-30f ? E / float (sqrt (eb)) : 1.0f;
+        float a1v = float (sqrt (vo.lI2.at (0) * vo.lI2.at (0) + vo.lQ2.at (0) * vo.lQ2.at (0)));
+        bool pred = a1v > 0.1f * E;
+        float u1r = a1v > 1e-30f ? vo.lI2.at (0) / a1v : 1.0f; float u1i = a1v > 1e-30f ? vo.lQ2.at (0) / a1v : 0.0f;
+        float ur = 1.0f; float ui = 0.0f;
+        float kap = lqKap.at (k);
+        float aD = 1.0f - float (exp (-float (B) / (0.05f * sr)));
+        for (int q = 0; q < K; ++q)
+        {
+            float gT = 1.0f; float crT = 0.0f; float ciT = 0.0f; float plT = 1.0f; float prT = 1.0f;
+            if (q < nK)
+            {
+                float nr = ur * u1r - ui * u1i; ui = ur * u1i + ui * u1r; ur = nr;
+                float zr = vo.lI2.at (q); float zi = vo.lQ2.at (q);
+                float a = float (sqrt (zr * zr + zi * zi));
+                if (pred && a > kap * E && a > 1e-30f)
+                {
+                    float vr = (zr * ur + zi * ui) / a; float vi = (zi * ur - zr * ui) / a;
+                    vo.lDr.at (q) = vo.lDr.at (q) + (vr - vo.lDr.at (q)) * aD; vo.lDi.at (q) = vo.lDi.at (q) + (vi - vo.lDi.at (q)) * aD;
+                }
+                if (vo.lWarm.at (q) > 0) vo.lWarm.at (q) = vo.lWarm.at (q) - 1;     // a partial just entered: its demodulation settles first
+                else
+                {
+                    float gk = G.at (q) * sc;
+                    float rho = a / (a + kap * E + 1e-30f);
+                    if (pred)
+                    {
+                        gT = gk * rho;
+                        float c = a * gk * (1.0f - rho);
+                        float dm = float (sqrt (vo.lDr.at (q) * vo.lDr.at (q) + vo.lDi.at (q) * vo.lDi.at (q)));
+                        if (dm < 1e-12f) dm = 1.0f;
+                        crT = c * (ur * vo.lDr.at (q) - ui * vo.lDi.at (q)) / dm;
+                        ciT = c * (ur * vo.lDi.at (q) + ui * vo.lDr.at (q)) / dm;
+                    }
+                    else gT = gk * rho + (1.0f - rho);
+                    float sp = 0.25f * T.at (q) * ((q % 2) == 0 ? -1.0f : 1.0f);
+                    plT = float (sqrt (1.0f - sp)); prT = float (sqrt (1.0f + sp));
+                }
+            }
+            vo.lgS.at (q) = (gT - vo.lg.at (q)) * invB;
+            // (V6.5) the complement glides in POLAR form: its module linearly, its phase by a rotation per sample — a partial δ Hz
+            // from its carrier turns k·δ per block, and a straight (cartesian) glide cut the arc's corner: a dip and sidebands at
+            // ±375 Hz (k = 16, δ = 3 Hz: 0.8 rad per block, −0.7 dB)
+            { float mT = float (sqrt (crT * crT + ciT * ciT)), m0 = vo.lcm.at (q);
+              vo.lcmS.at (q) = (mT - m0) * invB;
+              if (mT > 1e-12f && m0 > 1e-12f)
+              {
+                  float ur = vo.lur.at (q), ui = vo.lui.at (q), un = float (sqrt (ur * ur + ui * ui));
+                  if (un > 1e-12f) { ur /= un; ui /= un; } else { ur = 1.0f; ui = 0.0f; }
+                  vo.lur.at (q) = ur; vo.lui.at (q) = ui;
+                  float tr = crT / mT, ti = ciT / mT;
+                  float dpr = tr * ur + ti * ui, dpi = ti * ur - tr * ui;              // target ÷ current
+                  float dphi = float (atan2 (dpi, dpr)) * invB;
+                  vo.lrc.at (q) = float (cos (dphi)); vo.lrs.at (q) = float (sin (dphi));
+              }
+              else
+              {
+                  if (mT > 1e-12f) { vo.lur.at (q) = crT / mT; vo.lui.at (q) = ciT / mT; }
+                  vo.lrc.at (q) = 1.0f; vo.lrs.at (q) = 0.0f;
+              } }
+            vo.lplS.at (q) = (plT - vo.lpl.at (q)) * invB; vo.lprS.at (q) = (prT - vo.lpr.at (q)) * invB;
+        }
+    }
+    // (V6.7, Mat: « augmenter de 6 dB le trim de laquer, je ne l'entend pas assez … juste 6 dB de plus sur son volume global »):
+    // the lacquered partials themselves (what the lacquer puts in place of the partials it takes out) are 6 dB louder, on every
+    // pad and on the subject; dose, curve above 90 % and the dry part unchanged
+    let kLqTrim = 1.9952623f;
+    float<2> lacquerSample (Voice& vo, float<2> x, float wet)
+    {
+        vo.lth += vo.ldth;
+        if (vo.lth > twoPi) vo.lth -= twoPi;
+        float c1 = float (cos (vo.lth)); float s1 = float (sin (vo.lth));
+        float ck = c1; float sk = s1;
+        float x2 = x[0] + x[1];
+        float lp = vo.llp;
+        float dL = 0.0f; float dR = 0.0f;
+        int K = vo.lK;
+        for (int q = 0; q < K; ++q)
+        {
+            float i1 = vo.lI1.at (q); i1 += (x2 * ck - i1) * lp; vo.lI1.at (q) = i1;
+            float i2 = vo.lI2.at (q); i2 += (i1 - i2) * lp; vo.lI2.at (q) = i2;
+            float q1 = vo.lQ1.at (q); q1 += (-x2 * sk - q1) * lp; vo.lQ1.at (q) = q1;
+            float q2 = vo.lQ2.at (q); q2 += (q1 - q2) * lp; vo.lQ2.at (q) = q2;
+            float p = i2 * ck - q2 * sk;
+            float g = vo.lg.at (q) + vo.lgS.at (q); vo.lg.at (q) = g;
+            float cm = max (0.0f, vo.lcm.at (q) + vo.lcmS.at (q)); vo.lcm.at (q) = cm;
+            float ur = vo.lur.at (q), ui = vo.lui.at (q), rc = vo.lrc.at (q), rs = vo.lrs.at (q);
+            float nur = ur * rc - ui * rs; ui = ur * rs + ui * rc; ur = nur; vo.lur.at (q) = ur; vo.lui.at (q) = ui;
+            float cr = cm * ur; float ci = cm * ui;
+            float pl = vo.lpl.at (q) + vo.lplS.at (q); vo.lpl.at (q) = pl;
+            float pr = vo.lpr.at (q) + vo.lprS.at (q); vo.lpr.at (q) = pr;
+            float e = (g * p + (cr * ck - ci * sk)) * kLqTrim;
+            dL += pl * e - p; dR += pr * e - p;
+            float nc = ck * c1 - sk * s1; sk = sk * c1 + ck * s1; ck = nc;
+        }
+        return x + float<2> (dL, dR) * (wet * vo.vg);
+    }
+
+    // ------------------------------------------------------------------ pole control (every 32 frames)
+    void voiceControl (Voice& vo, int k, float64 ap, bool stage0)
+    {
+        float64 jf = ap / float64 (AH);
+        int j0 = int (jf); float u = float (jf - float64 (j0));
+        // measured pitch, trusted between 30 Hz and 2 kHz (above that the tracker's rare outliers retuned the whole bank)
+        float fa = aF0 (k, j0); float fb = aF0 (k, j0 + 1); float conf = aConf (k, j0);
+        bool okA = fa > 30.0f && fa < 2000.0f; bool okB = fb > 30.0f && fb < 2000.0f;
+        float f0 = 0.0f;
+        if (okA && okB) f0 = fa * float (pow (fb / fa, u));
+        else f0 = okA ? fa : (okB ? fb : 0.0f);
+        if (f0 <= 0.0f || conf < 0.5f) f0 = vo.lastF0 > 0.0f ? vo.lastF0 : childRefHz.at (k);
+        else vo.lastF0 = f0;
+        f0 = clamp (f0, 20.0f, 4000.0f);
+        // (V6.5) voicing gate: the anatomy's pitch confidence between two frames, 0.35 → 0.6 (smooth), glided in 20 ms
+        { float cf = aConf (k, j0) * (1.0f - u) + aConf (k, j0 + 1) * u, vgT = smooth01 (0.35f, 0.6f, cf);
+          if (! vo.vgI) { vo.vg = vgT; vo.vgI = true; }
+          float vgN = vo.vg + (vgT - vo.vg) * kGl20; vo.vgS = (vgN - vo.vg) / float (CTRL); }
+        if (vo.lqOn) lacquerControl (vo, k, f0, vo.pad < 0 ? NC : vo.pad);
+        vo.ratio = 1.0f;
+        if (vo.onH) chairControl (vo, k, j0, u, f0);
+        float f0e = f0 * vo.ratio;
+        if (vo.onM) masqueControl (vo, k, j0, u, f0e);
+        if (vo.onC) corpsControl (vo, childRefHz.at (k) * vo.ratio);     // BODY: on the mummer's note, not its instantaneous pitch
+        vo.markHit = false;
+    }
+
+    // ------------------------------------------------------------------ notes on and off
+    event midiIn (std::midi::Message m)
+    {
+        if (m.isNoteOn() && m.getVelocity() > 0) noteOn (m.getNoteNumber(), m.getVelocity());
+        else if (m.isNoteOff() || m.isNoteOn()) noteOff (m.getNoteNumber());
+        else if (m.isController() && (m.getControllerNumber() == 123 || m.getControllerNumber() == 120))
+            for (int v = 0; v < NV; ++v) if (voices.at (v).active) noteOffVoice (v);
+    }
+
+    void startCut (int v, float ms)
+    {
+        if (! voices.at (v).active) return;
+        float tau = max (0.001f, ms / 5000.0f);          // −43 dB after "ms"
+        float mul = float (exp (-1.0f / (tau * srOut)));
+        if (! voices.at (v).cutting) voices.at (v).lenCut = voices.at (v).child < 0 ? parentLen : childLen.at (voices.at (v).child);
+        if (! voices.at (v).cutting || mul < voices.at (v).cutMul) { voices.at (v).cutting = true; voices.at (v).cutMul = mul; }
+    }
+
+    void noteOn (int note, int vel)
+    {
+        int pad = note - baseNote;
+        if (pad < -1 || pad >= NC) return;
+        // (V6.3) the subject plays from its own slot (poles, lacquer) once the brain has sent it, else from its buffer
+        int child = pad < 0 ? (childReady.at (SUBJ) ? SUBJ : -1) : padChild.at (pad);
+        if (child >= 0 && ! childReady.at (child)) return;
+        if (child < 0 && parentLen <= 0) return;
+        if (monoMode == 1)
+        {
+            // solo voicing (two voices): whatever was already dying goes in 10 ms, the sounding voice dies with the choke time
+            for (int v = 0; v < NV; ++v)
+                if (voices.at (v).active) { if (voices.at (v).cutting) startCut (v, 10.0f); else startCut (v, cutMs); }
+        }
+        else
+        {
+            int live = 0; int oldest = -1;
+            for (int v = 0; v < NV; ++v)
+                if (voices.at (v).active && ! voices.at (v).cutting)
+                {
+                    live += 1;
+                    if (oldest < 0 || voices.at (v).age < voices.at (oldest).age) oldest = v;
+                }
+            if (live >= MAXPOLY && oldest >= 0) startCut (oldest, 10.0f);
+        }
+        int vi = -1;
+        for (int v = 0; v < NV; ++v) if (! voices.at (v).active) { vi = v; break; }
+        if (vi < 0)
+        {
+            float lowest = 2.0f;
+            for (int v = 0; v < NV; ++v) if (voices.at (v).cutting && voices.at (v).cut < lowest) { lowest = voices.at (v).cut; vi = v; }
+            if (vi < 0) vi = 0;
+        }
+        int pq = pad < 0 ? NC : pad;
+        float g = float (pow (10.0f, (float (vel) / 127.0f - 1.0f) * 24.0f / 20.0f));
+        voices.at (vi).active = true; voices.at (vi).child = child; voices.at (vi).pad = pad; voices.at (vi).note = note;
+        voices.at (vi).age = ageCounter; ageCounter += 1;
+        voices.at (vi).pos = 0.0; voices.at (vi).lpos = 0.0; voices.at (vi).stage = 0; voices.at (vi).xf = 0.0f;
+        voices.at (vi).held = true; voices.at (vi).sustain = pMode.at (pq) == 1;
+        voices.at (vi).env = voices.at (vi).sustain ? 0.0f : 1.0f; voices.at (vi).envStage = 0;
+        voices.at (vi).gain = g; voices.at (vi).cutting = false; voices.at (vi).cutMul = 1.0f; voices.at (vi).cut = 1.0f;
+        voices.at (vi).markIdx = 0; voices.at (vi).markHit = false; voices.at (vi).ctl = 0;
+        voices.at (vi).segInit = false; voices.at (vi).segA = 0.0; voices.at (vi).segB = 0.0; voices.at (vi).revPos = 0.0;
+        voices.at (vi).tailPos = 0.0; voices.at (vi).tailX = 1.0f; voices.at (vi).tailStep = 0.0f; voices.at (vi).gap = 0.0;
+        voices.at (vi).gxA = 0.0; voices.at (vi).gxP = 0.0; voices.at (vi).gxT = 0.0; voices.at (vi).gxLs = 0.0; voices.at (vi).gxD = 0.0; voices.at (vi).gxOn = false;
+        voices.at (vi).gxFOld = 0.0; voices.at (vi).gxFX = 1.0f; voices.at (vi).gxFStep = 0.0f;
+        voices.at (vi).pin = 1e-9f; voices.at (vi).pout = 1e-9f; voices.at (vi).agc = 1.0f;
+        voices.at (vi).lastF0 = 0.0f; voices.at (vi).loudPrev = 0.0f; voices.at (vi).ratio = 1.0f;
+        voices.at (vi).onC = false; voices.at (vi).onM = false; voices.at (vi).onH = false;
+        voices.at (vi).ghOn = false; voices.at (vi).ghG = 0.0f; voices.at (vi).ghX = 1.0f; voices.at (vi).lenCut = 0;
+        voices.at (vi).pl = pPL.at (pq); voices.at (vi).pr = pPR.at (pq); voices.at (vi).pw = pPW.at (pq); voices.at (vi).pg = pGain.at (pq);
+        voices.at (vi).lqOn = false; voices.at (vi).lw = 0.0f;
+        voices.at (vi).vg = 1.0f; voices.at (vi).vgS = 0.0f; voices.at (vi).vgI = false;
+        voices.at (vi).gxC = 0.0f; voices.at (vi).gxS = 0.0f; voices.at (vi).gxR = 0.0f;
+        voices.at (vi).hxC = 0.0f; voices.at (vi).hxS = 0.0f; voices.at (vi).hxR = 0.0f; voices.at (vi).xfLen = 3840.0f;
+        float jx = 0.0f; float jy = 0.0f;
+        padJoy (pad, jx, jy);
+        voices.at (vi).gG = max (0.0f, jy); voices.at (vi).gM = max (0.0f, -jy);
+        voices.at (vi).gC = max (0.0f, jx); voices.at (vi).gH = max (0.0f, -jx);
+    }
+
+    void noteOffVoice (int v)
+    {
+        if (! voices.at (v).held) return;
+        voices.at (v).held = false;
+        if (! voices.at (v).sustain) return;                // one-shot: the mummer plays to its end
+        voices.at (v).envStage = 3;
+        // in stasis (or entering it): back to the mummer's natural ending, from its hold point
+        if (voices.at (v).child >= 0 && (voices.at (v).stage == 1 || voices.at (v).stage == 2))
+        {
+            int k = voices.at (v).child, ll = max (1, loopLen.at (k));
+            if (loopSeamless.at (k))
+            {
+                // out of a loop of the mummer's own sound: the mummer resumes at the looped instant; outside the loop's
+                // blended tail (its last quarter second) the two are the same sound — no fade; inside it, an 80 ms fade
+                float64 lp = voices.at (v).lpos - float64 (ll) * floor (voices.at (v).lpos / float64 (ll));
+                int X = min (12000, ll / 3);
+                voices.at (v).pos = float64 (loopStart.at (k)) + lp + gxDelay (voices.at (v), k);     // (V6.8) heard there
+                if (lp < float64 (ll - X) && voices.at (v).gG < 0.001f) { voices.at (v).stage = 0; voices.at (v).xf = 0.0f; }
+                else { voices.at (v).stage = 3; voices.at (v).xf = 0.0f; }
+            }
+            else
+            {
+                voices.at (v).stage = 3; voices.at (v).xf = 0.0f;
+                voices.at (v).pos = float64 (loopStart.at (k)) + gxDelay (voices.at (v), k);
+            }
+        }
+    }
+    void noteOff (int note)
+    {
+        for (int v = 0; v < NV; ++v) if (voices.at (v).active && voices.at (v).note == note) noteOffVoice (v);
+    }
+
+    // ------------------------------------------------------------------ voice rendering
+    // (V6.5) the three readers: the mummer, its loop, the subject — bandlimited (see kr), q the reading speed
+    float<2> readChild (int k, float64 p, float q)
+    {
+        float64 fl = floor (p); int c = int (fl); float fr = float (p - fl);
+        if (fr == 0.0f && q <= 1.0f) return childFrame (k, c);
+        float qq = clamp (q, 1.0f, 4.0f); float sc = float (KRP) / qq; int h = int (float (KRW) * qq);
+        float<2> acc = float<2> (0.0f);
+        for (int j = 1 - h; j <= h; ++j) acc += childFrame (k, c + j) * krAt (abs (float (j) - fr) * sc);
+        return acc * (1.0f / qq);
+    }
+    float<2> readLoop (int k, float64 p, float q)
+    {
+        float64 fl = floor (p); int c = int (fl); float fr = float (p - fl);
+        if (fr == 0.0f && q <= 1.0f) return loopFrame (k, c);
+        float qq = clamp (q, 1.0f, 4.0f); float sc = float (KRP) / qq; int h = int (float (KRW) * qq);
+        float<2> acc = float<2> (0.0f);
+        for (int j = 1 - h; j <= h; ++j) acc += loopFrame (k, c + j) * krAt (abs (float (j) - fr) * sc);
+        return acc * (1.0f / qq);
+    }
+    float<2> readParent (float64 p, float q, int lim)
+    {
+        float64 fl = floor (p); int c = int (fl); float fr = float (p - fl);
+        if (fr == 0.0f && q <= 1.0f) return parentFrame (c, lim);
+        float qq = clamp (q, 1.0f, 4.0f); float sc = float (KRP) / qq; int h = int (float (KRW) * qq);
+        float<2> acc = float<2> (0.0f);
+        for (int j = 1 - h; j <= h; ++j) acc += parentFrame (c + j, lim) * krAt (abs (float (j) - fr) * sc);
+        return acc * (1.0f / qq);
+    }
+    // slow stasis path (the same as the birth engine's): ±60 ms around the hold point
+    float stasePath (float64 lp, int ll)
+    {
+        float64 t = lp / float64 (max (ll, 1));
+        return float (0.65 * sin (twoPi * t) + 0.35 * sin (2.0 * twoPi * t + 1.1));
+    }
+    // (V6.5) positions in float64: in float32 a position past 5.5 s was known to 1/32 of a sample (past 10.9 s, 1/16)
+    float<2> ghostAt (float64 src, float q)
+    {
+        int si = int (src);
+        if (si < 1 || si >= parentLen - 2) return float<2> (0.0f);
+        return readParent (src, q, parentLen);
+    }
+    // source position in the subject (anatomy word 7), interpolated between frames. (V6.1) Where the mummer's time map
+    // JUMPS between two frames (a cut, a repeat, a fragment moved: more than 4 hops of source forward or 1.5 back), the
+    // position is no longer swept across the gap — 1024 frames sweeping a whole second of the subject made a chirp (the sharp
+    // artifacts heard with SHADOW): the reading goes on at the speed it had and the jump falls on the frame boundary, where
+    // ghostStep crossfades it
+    float64 ghostSrcAt (int k, float64 p)
+    {
+        float64 jf = p / float64 (AH);
+        int j = int (jf); float t = float (jf - float64 (j));
+        int a = aw (k, j, 7); int b = aw (k, j + 1, 7);
+        if (a < 0) return -1.0;
+        float d = b >= 0 ? float (b - a) : float (AH);
+        if (d > 4.0f * float (AH) || d < -1.5f * float (AH))
+        {
+            int a0 = aw (k, j - 1, 7);
+            float da = a0 >= 0 && j > 0 ? float (a - a0) : float (AH);
+            d = (da <= 4.0f * float (AH) && da >= -1.5f * float (AH)) ? da : float (AH);
+        }
+        return float64 (a) + float64 (d) * float64 (t);
+    }
+    // SHADOW's reader (V6.1): follows the wanted source position sample by sample; at a jump (more than 24 samples from where
+    // it was) the old reading goes on at its speed and fades out in 10 ms while the new one fades in (equal power); where the
+    // mummer has no source (synthesis, silence) or the voice has none yet, the ghost fades out or in over 5 ms instead of
+    // vanishing or appearing at once
+    float<2> ghostStep (Voice& vo, float64 q, float64 stepR)
+    {
+        if (q >= 0.0)
+        {
+            float64 want = q;
+            if (! vo.ghOn) { vo.ghP = want; vo.ghV = float (stepR); vo.ghX = 1.0f; vo.ghG = 0.0f; vo.ghOn = true; }
+            else
+            {
+                float64 d = want - vo.ghP;
+                if (abs (d) > 24.0) { vo.ghO = vo.ghP; vo.ghVO = vo.ghV; vo.ghX = 0.0f; vo.ghV = float (stepR); }
+                else vo.ghV = clamp (float (d), -8.0f, 8.0f);
+                vo.ghP = want;
+            }
+            vo.ghG = min (1.0f, vo.ghG + 200.0f / srOut);
+        }
+        else
+        {
+            if (! vo.ghOn) return float<2> (0.0f);
+            vo.ghP = vo.ghP + float64 (vo.ghV);
+            vo.ghG = max (0.0f, vo.ghG - 200.0f / srOut);
+            if (vo.ghG <= 0.0f) { vo.ghOn = false; return float<2> (0.0f); }
+        }
+        float<2> g = ghostAt (vo.ghP, abs (vo.ghV));
+        if (vo.ghX < 1.0f)
+        {
+            vo.ghO = vo.ghO + float64 (vo.ghVO);
+            float x = vo.ghX; vo.ghX = min (1.0f, x + 100.0f / srOut);
+            g = g * float (sin (0.5 * pi * float64 (x))) + ghostAt (vo.ghO, abs (vo.ghVO)) * float (cos (0.5 * pi * float64 (x)));
+        }
+        return g * vo.ghG;
+    }
+
+    // ------------------------------------------------------------------ HOLD GRAINS (V6.4)
+    // Mat: "in hold mode the loops are still too poor: they should be joined with granular synthesis for an interesting texture,
+    // the loop lower than the grains; the grains as close as possible to the original timbre, so the analysis must inform the
+    // window size, the number of grains, their envelope". In stasis the loop drops to −9 dB under a cloud of grains (−0.6 dB:
+    // the sum keeps the level) read from the HELD ZONE of the mummer (around the hold point, while it stays within 15 dB of
+    // it, ±2 s). Everything comes from the brain (grains.js): the grain length (≥ 4 periods and ≥ 30 ms so a grain carries the
+    // pitch and the timbre, ≤ the time the sound stays itself), how many at once (3 on the period grid for a pitched zone:
+    // onsets and read positions on whole periods, the grains add in phase; 4 staggered for an unpitched one), the envelope
+    // (Hann for a held sound, a 10 % rise and a long fall for a struck one), each grain's detune and level from the subject's
+    // pitch and level life, its place from the zone's width; read around a cursor that crosses the zone back and forth four
+    // times slower than the sound, within half the time the sound stays itself (neighbouring grains carry the same state of the
+    // sound: they add without beating). Positions, detunes, levels, places: Weyl sequences (no draw).
+    // (V6.6) how long before the hold point the stasis begins: inside the held zone (where the grains are read), its last
+    // 0.45 s at most, half the loop at most, never before the mummer's start. A held zone that begins at the hold point (or
+    // less than 80 ms before it) is not anticipated: the fade then starts at the hold point (80 ms), as before — anticipating it
+    // would lay the loop over the attack (measured on « la cour »: the hold point 10 ms into its zone, at the end of the
+    // attack, the loop brought 5 dB above the rising attack)
+    int holdLead (int k)
+    {
+        int ls = loopStart.at (k);
+        int x = min (int (0.45f * FS), loopLen.at (k) / 2);
+        if (grOk.at (k)) x = grZs.at (k) < ls ? min (x, ls - grZs.at (k)) : 0;
+        if (x < 3840) x = 0;
+        return clamp (x, 0, ls);
+    }
+    void grainsReset (Voice& vo)
+    {
+        for (int g = 0; g < 10; ++g) { vo.grL.at (g) = 0.0f; vo.grA.at (g) = 0.0f; }
+        vo.grNext = 0.0f; vo.grCount = 1 + 7 * max (0, vo.pad) + (vo.note % 12); vo.grMix = 0.0f;
+        vo.grT = 0.0; { float ph = float (vo.grCount) * 0.618034f; vo.grPh = ph - floor (ph); }
+        int k = max (0, vo.child);
+        // (V6.6) the cloud fills over three grain lengths, 0.3 to 1 s (it was one grain + 20 ms: 52 to 140 ms)
+        vo.grMixS = grOk.at (k) ? 1.0f / clamp (3.0f * grLc.at (k), 0.3f * FS, 1.0f * FS) : 1.0f;
+        float64 lo = float64 (grZs.at (k) + 2); float64 hi = max (lo, float64 (grZs.at (k) + grZl.at (k) - int (grLc.at (k)) - 4));
+        vo.grC = clamp (float64 (grZs.at (k) + grScan0.at (k)), lo, hi); vo.grDir = 1.0f;
+    }
+    float grWin (float u, float a, float d)
+    {
+        if (u < a) { float x = float (sin (0.5f * float (pi) * u / a)); return x * x; }
+        if (u > 1.0f - d) { float x = float (sin (0.5f * float (pi) * (1.0f - u) / d)); return x * x; }
+        return 1.0f;
+    }
+    // (V6.5) — Mat: « je trouve les sons souvent un peu grainy ». Measured on the V6.4 cloud: an overlap-add that summed to a
+    // constant only by chance (0.8 to 5.4 dB of ripple at the grain rate), and each grain's detune (≤ ±12 c), level (≤ ±3 dB)
+    // and place (± the zone's width) drawn anew at every onset — the subject's slow life turned into steps at 20–100 Hz: an
+    // AM/FM noise, the grain itself; overlapping grains a few cents apart beat (12 c at 3 kHz: 21 Hz); 6 slots for overlaps up
+    // to 8. Now: a held zone sums exactly (COLA on the period grid, see readLacquer; the unpitched cloud normalised by its
+    // running power), the subject's life (the same depth: its pitch and level life, its width) is a SLOW common motion — two
+    // incommensurate sines each (0.37 and 0.83 Hz for the pitch, 0.29 and 0.71 Hz for the level, 0.11 Hz for the place) read
+    // at each grain's onset — so neighbouring grains carry nearly the same state and add without beating; an unpitched cloud
+    // keeps a small spread between grains (a quarter of the life; noise does not beat) and alternates its grains left and right
+    // within the width; 10 slots. A struck zone keeps its strikes (its window and its static level).
+    float grLife (float64 t, float f1, float f2, float ph)
+    {
+        return 0.6f * float (sin (twoPi * (float64 (f1) * t + float64 (ph)))) + 0.4f * float (sin (twoPi * (float64 (f2) * t + float64 (ph) * 1.618034)));
+    }
+    // (V6.5) a pitched grain's read position, refined so that its waveform continues the LOOP that sounds under it (the same
+    // phase): the grains on a grid of the mean period counted from the zone's start drifted out of phase with each other and with
+    // the loop wherever the pitch moved (a comb moving at the grain rate). The search (Interstice's splice, measured there): the
+    // mono waveform of one period (≤ 384 samples, 48 taps) of the loop at its current position against the zone around the
+    // wanted position, every lag within ± half a period (coarse, then refined to the sample)
+    float grMono (int k, int i) { float<2> x = childFrame (k, i); return x[0] + x[1]; }
+    float lpMono (int k, int i) { float<2> x = loopFrame (k, i); return x[0] + x[1]; }
+    float64 grAlign (int k, float64 p0, float64 lpos, float pe, float64 cLo, float64 cHi)
+    {
+        int W = int (min (pe, 384.0f)); int ws = max (1, W / 48);
+        int D = int (min (0.5f * pe, 480.0f)); int ds = max (1, D / 48);
+        int base = int (p0); int lp0 = int (lpos);
+        float best = -1.0e30f; int bd = 0;
+        // (V6.5) the loop's period and the zone around the grain decoded once (they were decoded again for every lag tried:
+        // 11 000 frames per grain, now 1 400 — the same products in the same order, the same result to the bit)
+        float[96] lr; float[1400] gz;
+        int nl = 0; for (int i = 0; i < W && nl < 96; i += ws) { lr.at (nl) = lpMono (k, lp0 + i); nl += 1; }
+        int z0 = base - D - ds; int nz = min (1400, 2 * D + 2 * ds + W + 1);
+        for (int j = 0; j < nz; ++j) gz.at (j) = grMono (k, z0 + j);
+        for (int d = -D; d <= D; d += ds)
+        {
+            float c = 0.0f; int o = d + D + ds; int q = 0;
+            for (int i = 0; i < W; i += ws) { c += lr.at (q) * gz.at (o + i); q += 1; }
+            if (c > best) { best = c; bd = d; }
+        }
+        int d0 = bd;
+        for (int d = d0 - ds + 1; d < d0 + ds; ++d)
+        {
+            if (d == d0) continue;
+            float c = 0.0f; int o = d + D + ds; int q = 0;
+            for (int i = 0; i < W; i += ws) { c += lr.at (q) * gz.at (o + i); q += 1; }
+            if (c > best) { best = c; bd = d; }
+        }
+        return clamp (float64 (base + bd) + (p0 - float64 (base)), cLo, cHi);
+    }
+    float<2> grainsSample (Voice& vo, int k, float64 stepR, float64 lpos)
+    {
+        float st = float (stepR);
+        // the cursor: back and forth across the zone
+        float64 cLo = float64 (grZs.at (k) + 2); float64 cHi = max (cLo, float64 (grZs.at (k) + grZl.at (k) - int (grLc.at (k)) - 4));
+        float64 cu = vo.grC + float64 (vo.grDir * grSpd.at (k) * st);
+        if (cu > cHi) { cu = 2.0 * cHi - cu; vo.grDir = -1.0f; }
+        if (cu < cLo) { cu = 2.0 * cLo - cu; vo.grDir = 1.0f; }
+        vo.grC = clamp (cu, cLo, cHi);
+        vo.grT = vo.grT + stepR / float64 (FS);
+        bool pitched = grPer.at (k) > 1.0f, held = grHeld.at (k);
+        vo.grNext -= st;
+        if (vo.grNext <= 0.0f)
+        {
+            int slot = -1;
+            for (int g = 0; g < 10; ++g) if (slot < 0 && vo.grL.at (g) <= 0.0f) slot = g;
+            if (slot >= 0)
+            {
+                float n = float (vo.grCount);
+                vo.grCount = vo.grCount + 1;
+                if (vo.grCount > 1000000) vo.grCount = 1;
+                float w0 = n * 0.618034f; w0 -= floor (w0);
+                float w1 = n * 0.754878f; w1 -= floor (w1);
+                float ln = grLc.at (k);
+                float pe = grPer.at (k);
+                // around the cursor, on the period grid (onsets and readings a whole number of periods apart: in phase)
+                float64 p0 = clamp (vo.grC + float64 ((2.0f * w0 - 1.0f) * grSpr.at (k)), cLo, cHi);
+                if (pe > 1.0f)
+                {
+                    p0 = cLo + float64 (pe) * float64 (int (float ((p0 - cLo) / float64 (pe)) + 0.5f));
+                    if (p0 > cHi && p0 - float64 (pe) >= cLo) p0 -= float64 (pe);
+                    p0 = grAlign (k, p0, lpos, pe, cLo, cHi);             // (V6.5) in phase with the loop that sounds
+                }
+                float age = -vo.grNext;                                   // the onset lands where the grid says, inside the frame
+                float64 t = vo.grT; float ph = vo.grPh;
+                // the subject's life as a slow common motion; an unpitched cloud adds a quarter of it per grain
+                // (a pitched zone carries its own pitch life in what the cursor reads: added on top, it beat against the loop)
+                float lc = pitched ? 0.0f : grJc.at (k) * (grLife (t, 0.37f, 0.83f, ph) + 0.25f * (2.0f * w1 - 1.0f));
+                float ld = grJd.at (k) * grLife (t, 0.29f, 0.71f, ph + 0.31f);
+                float pn = grW.at (k) * float (sin (twoPi * (0.11 * t + float64 (ph) + 0.5)));
+                if (! pitched) pn = grW.at (k) * (int (n) % 2 == 0 ? 1.0f : -1.0f) * (0.6f + 0.4f * grLife (t, 0.13f, 0.31f, ph + 0.7f));
+                vo.grP.at (slot) = p0 + float64 (age);
+                vo.grI.at (slot) = st * float (pow (2.0f, lc / 1200.0f));
+                vo.grA.at (slot) = age; vo.grL.at (slot) = ln;
+                vo.grG.at (slot) = float (pow (10.0f, ld * 0.05f));
+                vo.grPn.at (slot) = clamp (pn, -0.9f, 0.9f);
+            }
+            float hop = grHop.at (k);
+            if (! pitched) { float n2 = float (vo.grCount) * 0.267949f; n2 -= floor (n2); hop *= 0.85f + 0.3f * n2; }   // unpitched: staggered
+            vo.grNext += hop;
+        }
+        float<2> y = float<2> (0.0f);
+        float sw = 0.0f; float sw2 = 0.0f;
+        for (int g = 0; g < 10; ++g)
+        {
+            float L = vo.grL.at (g);
+            if (L > 0.0f)
+            {
+                float u = vo.grA.at (g) / L;
+                if (u >= 1.0f) vo.grL.at (g) = 0.0f;
+                else
+                {
+                    float w = grWin (u, grAc.at (k), grDc.at (k));
+                    float e = w * vo.grG.at (g);
+                    float pn = vo.grPn.at (g);
+                    float<2> x = readChild (k, vo.grP.at (g), abs (vo.grI.at (g)));
+                    y += float<2> (x[0] * float (sqrt (1.0f - pn)), x[1] * float (sqrt (1.0f + pn))) * e;
+                    sw += w; sw2 += w * w;
+                    vo.grP.at (g) = vo.grP.at (g) + float64 (vo.grI.at (g));
+                    vo.grA.at (g) = vo.grA.at (g) + st;
+                }
+            }
+        }
+        // the level: a held pitched zone in phase sums exactly (static 1 / (overlap − 1)); an unpitched held cloud is divided by its
+        // running power (uncorrelated grains: the powers add), so no dip or swell follows the staggered onsets; a struck zone as before
+        if (held && ! pitched) return y * (1.0f / float (sqrt (max (sw2, 0.0025f))));
+        return y * grNorm.at (k);
+    }
+
+    float<2> renderVoice (Voice& vo, float64 stepR, float sm, float xfStep)
+    {
+        int k = vo.child;
+        float64 u = vo.pos;
+        float<2> s = float<2> (0.0f);
+        int pq = vo.pad < 0 ? NC : vo.pad;
+        if (k >= 0)
+        {
+            // mummer being replaced: the voice finishes its (already started) fade, otherwise it stops
+            if (! childReady.at (k) && ! vo.cutting) { vo.active = false; return float<2> (0.0f); }
+            int len = childLen.at (k);
+            int st = vo.stage;
+            bool hasLoop = loopLen.at (k) > 0;
+            // entering stasis: hold mode, key still down, hold point reached
+            // (V6.6) Mat: « le son tombe dans la granulation en mode hold mais de manière abrupte, il faut un crossfade plus
+            // doux et musical ». Measured (clarinette basse, mummer 1, held): the hold point sits where the mummer's held zone
+            // ends — its own reading falls from 27 to 15 dB in the 50 ms after it (the note's ending) — and the 80 ms fade to
+            // the loop crossed that fall: a 9 dB hole, then the cloud of grains filling in 140 ms. Now the stasis begins BEFORE
+            // the hold point, inside the held zone (its last 0.45 s at most, half the loop at most), so the loop and its cloud
+            // take over while the mummer still sustains (holdLead)
+            bool seam = loopSeamless.at (k) && vo.gG < 0.001f;
+            float64 uh = u - gxDelay (vo, k);                                  // (V6.8) what is heard (GESTURE may delay it)
+            if (st == 0 && vo.sustain && vo.held && hasLoop && uh >= float64 (loopStart.at (k) - (seam ? 0 : holdLead (k))))
+            {
+                // the mummer's own sound: the loop takes over at the same sample, no fade (a fade between two identical
+                // signals would swell by 3 dB)
+                // (V6.1) …only when GESTURE is off: with it, the mummer is read partly backwards and the loop is not that
+                // reading — a fade then (it was a jump)
+                if (seam) { st = 2; vo.stage = 2; vo.xf = 1.0f; vo.lpos = uh - float64 (loopStart.at (k)); }
+                else
+                {
+                    st = 1; vo.stage = 1; vo.xf = 0.0f; vo.lpos = 0.0;
+                    vo.xfLen = float (max (3840, int (float64 (loopStart.at (k)) - uh + 0.5)));      // to the hold point (80 ms at least)
+                    vo.hxC = 0.0f; vo.hxS = 0.0f; vo.hxR = 0.0f;
+                }
+                grainsReset (vo);
+            }
+            if ((st == 0 || st == 3) && uh >= float64 (len - 3)) { vo.active = false; return float<2> (0.0f); }
+
+            float jx = 0.0f; float jy = 0.0f;
+            padJoy (vo.pad, jx, jy);
+            bool ana = anaReady.at (k);
+            vo.gG += ((ana ? max (0.0f, jy) : 0.0f) - vo.gG) * sm;
+            vo.gM += ((ana ? max (0.0f, -jy) : 0.0f) - vo.gM) * sm;
+            vo.gC += ((ana ? max (0.0f, jx) : 0.0f) - vo.gC) * sm;
+            vo.gH += ((ana ? max (0.0f, -jx) : 0.0f) - vo.gH) * sm;
+
+            // reading: mummer (with GESTURE), stasis, or a fade between them
+            float64 ap = u;
+            float64 ghostSrc = -1.0;
+            if (st == 0)
+            {
+                s = childGesture (vo, k, u, stepR);
+                ap = vo.gap;
+                if (filS > 1e-4f) ghostSrc = ghostSrcAt (k, ap);
+            }
+            else
+            {
+                float xf = vo.xf;
+                float<2> sl = readLoop (k, vo.lpos, float (stepR));
+                // (V6.4) the loop joined by the grains of the held zone, the loop 9 dB under them
+                if (grOk.at (k))
+                {
+                    if (st != 3) vo.grMix = min (1.0f, vo.grMix + vo.grMixS * float (stepR));     // the cloud fills, then takes over
+                    float m = vo.grMix; m = m * m * (3.0f - 2.0f * m);                            // (V6.6) on an S
+                    if (m > 0.0f) sl = sl * (1.0f - m * (1.0f - grLoopG.at (k))) + grainsSample (vo, k, stepR, vo.lpos) * (m * grGrainG.at (k));
+                }
+                float<2> sc = st == 2 ? float<2> (0.0f) : childGesture (vo, k, u, stepR);     // the same reading as before the stasis
+                // (V6.6) a raised-cosine progress (no corner at either end), equal power divided by √(1 + 2ρ·a·b), ρ the two
+                // readings' correlation over 20 ms (as GESTURE's): the level stays the sound's own whatever they share
+                float xp = 0.5f - 0.5f * float (cos (pi * float64 (xf)));
+                float a = float (cos (0.5 * pi * float64 (xp))); float b = float (sin (0.5 * pi * float64 (xp)));
+                if (st == 2) s = sl;
+                else
+                {
+                    float mc = 0.5f * (sc[0] + sc[1]); float ml = 0.5f * (sl[0] + sl[1]);
+                    vo.hxC += (mc * ml - vo.hxC) * kHx; vo.hxS += (mc * mc - vo.hxS) * kHx; vo.hxR += (ml * ml - vo.hxR) * kHx;
+                    float rho = clamp (vo.hxC / float (sqrt (vo.hxS * vo.hxR + 1e-12f)), -0.5f, 1.0f);
+                    float kk = 1.0f / float (sqrt (max (0.25f, 1.0f + 2.0f * rho * a * b)));
+                    s = st == 1 ? (sc * a + sl * b) * kk : (sl * a + sc * b) * kk;
+                }
+                // the poles read the anatomy of what actually sounds: in a loop of the mummer's own sound, the looped instant
+                float64 lp = vo.lpos - float64 (loopLen.at (k)) * floor (vo.lpos / float64 (max (1, loopLen.at (k))));
+                ap = st == 3 ? u : (loopSeamless.at (k) ? float64 (loopStart.at (k)) + lp : float64 (loopStart.at (k)));
+                if (filS > 1e-4f)
+                {
+                    float64 ga = ghostSrcAt (k, float64 (loopStart.at (k)));
+                    float64 gs = loopSeamless.at (k) ? ghostSrcAt (k, ap) : (ga >= 0.0 ? ga + float64 (0.06f * FS * stasePath (vo.lpos, loopLen.at (k))) : -1.0);
+                    ghostSrc = st == 3 ? ghostSrcAt (k, u) : gs;
+                }
+                vo.lpos = vo.lpos + stepR;
+                if (st == 1 || st == 3)
+                {
+                    vo.xf = xf + (st == 1 ? float (stepR) / max (1.0f, vo.xfLen) : xfStep);
+                    if (vo.xf >= 1.0f) vo.stage = st == 1 ? 2 : 0;
+                }
+            }
+            // poles: switch-on (states cleared), control every 32 frames
+            if (ana)
+            {
+                if (vo.gH > 0.001f) { if (! vo.onH) { chairReset (vo); vo.onH = true; vo.ctl = 0; } } else if (vo.hwet <= 0.0f) vo.onH = false;
+                if (vo.gM > 0.001f) { if (! vo.onM) { masqueReset (vo); vo.onM = true; vo.ctl = 0; } } else if (vo.mxf <= 0.0f) vo.onM = false;
+                if (vo.gC > 0.001f) { if (! vo.onC) { corpsReset (vo); vo.onC = true; vo.ctl = 0; } } else vo.onC = false;
+                vo.ctl -= 1;
+                if (vo.ctl <= 0) { vo.ctl = CTRL; voiceControl (vo, k, ap, st == 0); }
+            }
+            // LACQUER (V6.3): the pad's dry/wet × the troupe's, gliding in 10 ms; switched on, its states start clean
+            // (V6.4, Mat: "100 % of lacquer should be a little more audible: between 90 and 100 % a logarithmic curve that raises
+            // the lacquer's volume by 10 dB, keeping the curve as it is from 0 to 90 %"): the dose (pad × troupe) is the dry/wet up to
+            // 0.9; above, the lacquer's own signal rises by 10 dB × (dose − 0.9) / 0.1 — ×3.16 at 100 %
+            vo.vg = clamp (vo.vg + vo.vgS, 0.0f, 1.0f);
+            float lx = pLq.at (pq) * lacqGlobal;
+            float lwT = lqOk.at (k) ? (lx <= 0.9f ? lx : lx * float (pow (10.0f, 5.0f * (lx - 0.9f)))) : 0.0f;
+            if (lwT > 0.0f && ! vo.lqOn && ana) { lacquerReset (vo, pq); vo.lw = 0.0f; }
+            if (vo.lqOn)
+            {
+                vo.lw += (lwT - vo.lw) * kPan;
+                if (lwT <= 0.0f && vo.lw < 1e-4f) vo.lqOn = false;
+                else s = lacquerSample (vo, s, vo.lw);
+            }
+            float<2> sIn = s;
+            if (vo.onH) s = chairSample (vo, s);
+            if (vo.onM) s = masqueSample (vo, s, vo.gM > 0.001f);
+            if (vo.onC) s = corpsSample (vo, s, vo.gC);
+            // loudness kept: the poles change the shape, not the level (~0.4 s tracking, −18..+6 dB)
+            if (vo.onH || vo.onM || vo.onC)
+            {
+                float ka = float (processor.period) * 2.5f;
+                vo.pin += (sIn[0] * sIn[0] + sIn[1] * sIn[1] - vo.pin) * ka;
+                vo.pout += (s[0] * s[0] + s[1] * s[1] - vo.pout) * ka;
+                float tg = clamp (float (sqrt ((vo.pin + 1e-10f) / (vo.pout + 1e-10f))), 0.125f, 2.0f);
+                vo.agc += (tg - vo.agc) * 0.0005f;
+            }
+            else vo.agc += (1.0f - vo.agc) * 0.0005f;
+            s *= vo.agc;
+            // SHADOW: the subject's ghost read along the mummer's time map (in stasis: the same slow path), by its own reader
+            if (filS > 1e-4f) s += filS * 0.7f * ghostStep (vo, ghostSrc, stepR);
+            else { vo.ghOn = false; vo.ghG = 0.0f; }
+        }
+        else
+        {
+            // (V6.1) a voice fading out because a new subject arrives reads the old one at its length (it stopped dead)
+            int pl = vo.cutting ? vo.lenCut : parentLen;
+            if (u >= float64 (pl - 3)) { vo.active = false; return float<2> (0.0f); }
+            s = readParent (u, float (stepR), pl);
+        }
+        // the pad's ADSR envelope (hold mode only)
+        if (vo.sustain)
+        {
+            int es = vo.envStage;
+            float e = vo.env;
+            float sus = pSus.at (pq);
+            if (es == 0) { e += pAtk.at (pq); if (e >= 1.0f) { e = 1.0f; vo.envStage = 1; } }
+            else if (es == 1) { e += (sus - e) * pDec.at (pq); if (abs (e - sus) < 1e-4f) vo.envStage = 2; }
+            else if (es == 2) { e += (sus - e) * 0.001f; }
+            else { e *= pRel.at (pq); if (e < 1e-4f) { vo.active = false; return float<2> (0.0f); } }
+            vo.env = e;
+            s *= e;
+        }
+        if (vo.cutting)
+        {
+            vo.cut *= vo.cutMul;
+            if (vo.cut < 1e-4f) { vo.active = false; return float<2> (0.0f); }
+            s *= vo.cut;
+        }
+        // the pad's place (V6.2)
+        vo.pl += (pPL.at (pq) - vo.pl) * kPan; vo.pr += (pPR.at (pq) - vo.pr) * kPan; vo.pw += (pPW.at (pq) - vo.pw) * kPan;
+        float mid = 0.5f * (s[0] + s[1]); float sid = 0.5f * (s[0] - s[1]);
+        s = float<2> (mid * vo.pl + sid * vo.pw, mid * vo.pr - sid * vo.pw);
+        vo.pos = u + stepR;
+        // (V6.4) the pad's gain, gliding in 10 ms
+        vo.pg += (pGain.at (pq) - vo.pg) * kPan;
+        return s * (vo.gain * vo.pg);
+    }
+
+    float<2> renderVoices()
+    {
+        float<2> sum = float<2> (0.0f);
+        float64 stepR = 48000.0 / processor.frequency;
+        float sm = float (processor.period) * 50.0f;          // pole smoothing ~20 ms
+        float xfStep = float (stepR) / (0.08f * FS);          // stasis fades: 80 ms
+        filS += (filiation - filS) * kFil;
+        for (int b = 0; b < 16; ++b) busY.at (b) = float<2> (0.0f);
+        for (int v = 0; v < NV; ++v)
+            if (voices.at (v).active)
+            {
+                float<2> y = renderVoice (voices.at (v), stepR, sm, xfStep);
+                busY.at (busOf (voices.at (v).pad)) += y;          // (V6.9) each pad to its pair
+                sum += y;
+            }
+        return sum;
+    }

@@ -1,0 +1,147 @@
+
+    // =================================================================================== messages to the interface
+    void sendStatus()
+    {
+        float[96] s;
+        int nv = 0; int nH = 0; int nM = 0; int nC = 0;
+        for (int v = 0; v < NV; ++v)
+            if (voices.at (v).active)
+            {
+                nv += 1;
+                if (voices.at (v).onH) nH += 1;
+                if (voices.at (v).onM) nM += 1;
+                if (voices.at (v).onC) nC += 1;
+            }
+        s[0] = float (rxActive); s[1] = rxFrames > 0 ? float (rxCount) / float (rxFrames) : 0.0f; s[2] = float (rxTarget);
+        s[3] = -1.0f; s[4] = float (parentLen) / FS; s[5] = float (nv); s[6] = 0.0f; s[7] = float (monoMode);
+        for (int p = 0; p < NC; ++p)
+        {
+            int k = padChild.at (p);
+            s.at (8 + p) = float (k); s.at (24 + p) = float (childLen.at (k)) / FS;
+            s.at (40 + p) = childReady.at (k) ? (anaReady.at (k) ? 2.0f : 1.0f) : 0.0f;
+            s.at (64 + p) = childReady.at (k) ? childSig.at (k) : -1.0f;
+        }
+        s[56] = s[1]; s[57] = float (rxTarget); s[58] = float (rxActive); s[59] = 0.0f;
+        s[80] = parentLen > 0 ? parentSig : -1.0f; s[81] = float (parentLen);
+        s[82] = float (scN); s[83] = scRoot; s[84] = scP;
+        s[85] = float (nH); s[86] = float (nM); s[87] = float (nC);
+        s[88] = 1.01f;                                  // playing engine version (1.0.1)
+        s[91] = float (mtsState); s[92] = useMts() ? 1.0f : 0.0f; s[93] = float (mtsN);   // (V6.9) the MTS-ESP master
+        s[94] = float (trackChannels); s[95] = float (trackPairs);                    // (V6.9) the track's channels, the pairs in use
+        // (V6.3) the subject's own slot: 0 absent, 1 received, 2 with its anatomy; its signature
+        s[89] = childReady.at (SUBJ) ? (anaReady.at (SUBJ) ? 2.0f : 1.0f) : 0.0f;
+        s[90] = childReady.at (SUBJ) ? childSig.at (SUBJ) : -1.0f;
+        status <- s;
+    }
+    void sendChildInfo (int k)
+    {
+        float[176] c;
+        c[0] = float (k); c[1] = float (childLen.at (k)) / FS; c[2] = float (loopStart.at (k)) / FS; c[3] = float (loopLen.at (k)) / FS;
+        c[4] = anaReady.at (k) ? 1.0f : 0.0f; c[5] = childPeak.at (k); c[6] = childSig.at (k);
+        c[7] = float (gesteLevel.at (k)); c[8] = float (nMarks.at (k)); c[9] = childRefHz.at (k); c[10] = float (anaFrames.at (k));
+        for (int q = 0; q < 128; ++q) c.at (40 + q) = childWave.at (k * 128 + q);
+        childInfo <- c;
+    }
+
+    float<2> guardY (float<2> y) { if (! (y[0] >= -8.0f && y[0] <= 8.0f) || ! (y[1] >= -8.0f && y[1] <= 8.0f)) return float<2> (0.0f); return y; }
+
+    // =================================================================================== main loop
+    void main()
+    {
+        initConsts();
+        setScale12 (261.63f);
+        mtsRaw[0] = -1.0f; mtsSend = 1;
+        for (int q = 0; q <= NC; ++q) { setPlay (q, q == NC ? 1 : 0, 2.0f, 300.0f, 1.0f, 400.0f); setPan (q, 0.0f); }
+        for (int p = 0; p < NC; ++p) padChild.at (p) = p;
+        for (int k = 0; k < NS; ++k) { childRefHz.at (k) = 220.0f; childSig.at (k) = -1.0f; }
+        for (int q = 0; q <= NC; ++q) { pLq.at (q) = 0.0f; pGain.at (q) = 1.0f; pLx.at (q) = 0.1 + 0.37 * float64 (q); pLy.at (q) = 0.0; pLz.at (q) = 2.0 + float64 (q); pLs.at (q) = 0.0; pLt.at (q) = 0.0f; }
+        int statusCount = 0; int telCount = 0;
+        float outGain = 0.5f;
+        float peakL = 0.0f; float peakR = 0.0f;
+        loop
+        {
+            if (rxDone != 0) { rxDone = 0; rxFinished(); sendStatus(); }
+            if (ackDirty != 0 && (statusCount & 127) == 0) { ackDirty = 0; rxAck <- ackValue(); }
+            float<2> y = renderVoices();
+            outGain += (volumeLin - outGain) * 0.001f;
+            y = y * outGain;
+            if (! (y[0] >= -8.0f && y[0] <= 8.0f)) y = float<2> (0.0f);
+            if (! (y[1] >= -8.0f && y[1] <= 8.0f)) y = float<2> (0.0f);
+            peakL = max (peakL, abs (y[0])); peakR = max (peakR, abs (y[1]));
+            // (V6.9) each pair: the pads sent to it, at the troupe's volume (1/2 alone: the same samples as before)
+            out <- guardY (busY.at (0) * outGain);
+            out3_4 <- guardY (busY.at (1) * outGain);
+            out5_6 <- guardY (busY.at (2) * outGain);
+            out7_8 <- guardY (busY.at (3) * outGain);
+            out9_10 <- guardY (busY.at (4) * outGain);
+            out11_12 <- guardY (busY.at (5) * outGain);
+            out13_14 <- guardY (busY.at (6) * outGain);
+            out15_16 <- guardY (busY.at (7) * outGain);
+            out17_18 <- guardY (busY.at (8) * outGain);
+            out19_20 <- guardY (busY.at (9) * outGain);
+            out21_22 <- guardY (busY.at (10) * outGain);
+            out23_24 <- guardY (busY.at (11) * outGain);
+            out25_26 <- guardY (busY.at (12) * outGain);
+            out27_28 <- guardY (busY.at (13) * outGain);
+            out29_30 <- guardY (busY.at (14) * outGain);
+            out31_32 <- guardY (busY.at (15) * outGain);
+            statusCount += 1;
+            if (statusCount >= 4800) { statusCount = 0; sendStatus(); }
+            telCount += 1;
+            if (telCount >= 1920)
+            {
+                telCount = 0;
+                float[40] tl;
+                for (int p = 0; p < NC; ++p)
+                {
+                    float pos = -1.0f; int bestAge = -1;
+                    for (int v = 0; v < NV; ++v)
+                        if (voices.at (v).active && ! voices.at (v).cutting && voices.at (v).pad == p && voices.at (v).child >= 0 && voices.at (v).age > bestAge)
+                        {
+                            bestAge = voices.at (v).age;
+                            int k = voices.at (v).child;
+                            float64 q = voices.at (v).stage == 2 ? float64 (loopStart.at (k)) : voices.at (v).pos;
+                            pos = float (q) / float (max (1, childLen.at (k)));
+                        }
+                    tl.at (p) = pos;
+                    tl.at (16 + p) = 0.0f;
+                    for (int v = 0; v < NV; ++v) if (voices.at (v).active && voices.at (v).pad == p && voices.at (v).stage == 2) tl.at (16 + p) = 1.0f;
+                }
+                tl[32] = peakL; tl[33] = peakR;
+                // (V6.3) the subject's playhead (its slot, or its buffer) and its stasis
+                {
+                    float pos = -1.0f; int bestAge = -1; float stz = 0.0f;
+                    for (int v = 0; v < NV; ++v)
+                        if (voices.at (v).active && ! voices.at (v).cutting && voices.at (v).pad < 0 && voices.at (v).age > bestAge)
+                        {
+                            bestAge = voices.at (v).age;
+                            int k = voices.at (v).child;
+                            if (k >= 0)
+                            {
+                                float64 q = voices.at (v).stage == 2 ? float64 (loopStart.at (k)) : voices.at (v).pos;
+                                pos = float (q) / float (max (1, childLen.at (k)));
+                                if (voices.at (v).stage == 2) stz = 1.0f;
+                            }
+                            else pos = float (voices.at (v).pos) / float (max (1, parentLen));
+                        }
+                    tl[34] = pos; tl[35] = stz;
+                }
+                telemetry <- tl;
+                peakL = 0.0f; peakR = 0.0f;
+            }
+            if (uiResend != 0)
+            {
+                uiResend = 0; sendStatus();
+                infoSendK = 0; mtsSend = 1;
+            }
+            if (mtsSend != 0 && (statusCount & 255) == 128) { mtsSend = 0; mtsInfo <- mtsRaw; }
+            if (infoSendK >= 0 && (statusCount & 255) == 0)
+            {
+                if (childReady.at (infoSendK)) sendChildInfo (infoSendK);
+                infoSendK += 1;
+                if (infoSendK >= NS) infoSendK = -1;
+            }
+            advance();
+        }
+    }
+}

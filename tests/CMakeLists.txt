@@ -1,0 +1,7 @@
+# Charivari — the small CLAP host of the builds (tests/clap_smoke.cpp)
+cmake_minimum_required(VERSION 3.16)
+project(clap_smoke CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_executable(clap_smoke clap_smoke.cpp)
+target_include_directories(clap_smoke PRIVATE ${CLAP_INCLUDE_PATH})
+target_link_libraries(clap_smoke PRIVATE ${CMAKE_DL_LIBS})

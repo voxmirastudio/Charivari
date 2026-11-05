@@ -1,0 +1,293 @@
+// Charivari 1.0 — Copyright (C) 2026 Matthieu Guillin, Vox Mira Studio
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+// It is distributed WITHOUT ANY WARRANTY; see the GNU General Public License (LICENSE). Credits: CREDITS.md.
+// =============================================================================================
+//  CHARIVARI V6.9 — vox mira studio — playing engine (V6.9 multichannel: sixteen stereo outputs, 1/2 to 31/32, each pad sent to the pair chosen for it, folded onto 1/2 while the host's track lacks that pair; V6.9: the four poles tuned, when asked, to an ODDSound MTS-ESP master — its 128 notes given by the plugin's native client, the analysis kept when no master runs; V6.8: GESTURE on a struck mummer — each attack swells in from its own body, the mummer delayed by a value of the subject's beat; V6.7: the lacquered partials 6 dB louder; V6.6: the lacquer's motion on the subject's pulse when it has one,
+//  humanised, at the index of the subject's own life; the stasis entered inside the held zone with a long fade compensated by
+//  correlation, the grain cloud filling over three grains on an S; a « Settings » parameter for the host's snapshots;
+//  V6.5: every reader bandlimited (32-tap Kaiser sinc, stretched when
+//  reading faster), MASK's folder at twice the rate with ADAA and its comb in Hermite, FLESH demodulated at the 4th order
+//  and its Hilbert pair corrected, the voicing gate, BODY in Hermite, SHADOW in float64, GESTURE's fades ≥ 5 ms and its
+//  mix compensated by correlation, hold grains in phase with the loop; V6.4: the lacquer plays a Moonvox timbre CREATED from the subject — its
+//  circulation table, its partials' life; in hold mode the loop joined by grains of the held zone, sized by the analysis; V6.3: the LACQUER — Moonvox laid by touches on each mummer's partials, in
+//  their phase, dosed per pad and per troupe; the subject as a 17th pad with its own joystick, playback, pan and lacquer; V6.2: a pan per pad, −4.5 dB law; V6.1: SHADOW without chirps, MASK and BODY gliding sample by sample, BODY audible, no dead stops when a mummer is replaced, 32 voices; engine as in v5.6: troupe number param43; v5.5 seamless real-waveform sustain loop)
+//  Rough music for one sound. The SUBJECT (a sample) is paraded as sixteen MUMMERS: caricatures of itself, born in the
+//  interface (living engine: phase-gradient vocoder, harmonic region cloning, instrument mutations) and sent here in
+//  acknowledged packets as 24-bit audio: the mummer, its LIVING STASIS loop, then its ANATOMY (measured by the brain on the
+//  mummer itself, 32 words every 1024 frames: pitch, confidence, loudness, formants, events, source position, spectral
+//  envelope in 24 bands). Nothing is re-analysed here: the four poles read what the engine measured and all tune to the
+//  scale found by the analysis — an ecosystem.
+//   up     GESTURE : the gesture turned inside out: each segment between two events (attacks at the sample, else note
+//                    changes, else loudness swells, else one single breath) is played backwards, attacks become swells
+//   right  BODY    : three looped waveguides mixed by a lossless 3×3 rotation (as in Cavity), tuned to the degree nearest the
+//                    measured pitch and the next two degrees; every GESTURE mark spins the field
+//   down   MASK    : the mummer's vowel (its formants) pushed (bells), stained (folder), the stain singing in a comb tuned to a
+//                    degree (spring reflection, as in Ripple Mirror), then removed by inverse bells mirrored around a degree
+//                    (as in Balance Stain's Pitch Invert)
+//   left   FLESH   : heterodyne bank on the measured harmonics (as in Carrousel): frequency shift turning into pitch shift
+//                    (partials realigned on a scale degree, as a sticky staircase), then partials snapped to the scale and
+//                    formants flipped
+//  LACQUER (V6.3, per pad, before the poles): each harmonic of the mummer demodulated (carriers k·Θ, Θ following its measured
+//  pitch); (V6.4) the Moonvox timbre the brain CREATED from the subject lends its colour and its motion (its circulation over
+//  one turn, 32 × 24, at the subject's rate, pushed by a Lorenz attractor; formants moved; each partial's own life; odd and
+//  even partials apart) through three brushes the attractor walks over the partials; every new partial keeps the phase of the one it replaces — where a partial is too weak to have
+//  one, the phase the subject gives it (k·ψ₁ + its relative phase, tracked while it was clear).
+//  HOLD GRAINS (V6.4): in stasis the loop drops 9 dB under a cloud of grains read from the held zone of the mummer — grain
+//  length, overlap, envelope, detune, level life, width and level all measured by the brain on that zone.
+//  Playing: one-shot or hold, ADSR, pan, lacquer and (V6.4) gain, SET PER PAD; crowd (24 voices) or solo (two voices).
+//  (V6.4) the lacquer dose (pad × troupe) is its dry/wet up to 90 %, then its own signal rises 10 dB more up to 100 %.
+//  Notes: base .. base+15 = mummers 1..16, base−1 = the subject (V6.3: from its own slot 17, with poles and lacquer, once the
+//  brain has sent it with its anatomy; until then, as before, straight from its buffer).
+// =============================================================================================
+
+processor Charivari [[ main ]]
+{
+    // (V6.9 multichannel) sixteen stereo outputs: 1/2 (the main one, as before) to 31/32; each pad (the subject too) is sent to
+    // the pair chosen for it (padPlay[9]); while the host's track has fewer channels than that pair (trackCh, given by the plugin's
+    // native code from REAPER; 0 = not known: every pair kept) the pad sounds on 1/2, its choice kept
+    output stream float<2> out;
+    output stream float<2> out3_4;
+    output stream float<2> out5_6;
+    output stream float<2> out7_8;
+    output stream float<2> out9_10;
+    output stream float<2> out11_12;
+    output stream float<2> out13_14;
+    output stream float<2> out15_16;
+    output stream float<2> out17_18;
+    output stream float<2> out19_20;
+    output stream float<2> out21_22;
+    output stream float<2> out23_24;
+    output stream float<2> out25_26;
+    output stream float<2> out27_28;
+    output stream float<2> out29_30;
+    output stream float<2> out31_32;
+    input event float trackCh;
+    input event std::midi::Message midiIn;
+    input event int uiRequest;
+    input event float[8] streamHeader;
+    input event StreamChunk streamChunk;
+    input event float[4] popReset;
+    input event float[10] padPlay;
+    input event float[64] scaleIn;
+    input event float[4] lacqMod;                // (V6.6) [pulse of the subject (Hz, 0: none), index of the lacquer's motion, —, —]
+    output event float[96] status;
+    output event float[176] childInfo;
+    output event float[40] telemetry;
+    output event int rxAck;
+    // (V6.9) the ODDSound MTS-ESP master, from the plugin's native client (none in AMORPH): [state (−1 no client, 0 no master,
+    // 1 a master), the frequency of MIDI notes 0 … 127 (Hz), the length of its tuning's name, its characters], given back to
+    // the interface as received
+    input event float[180] mtsIn;
+    output event float[180] mtsInfo;
+
+    // ------------------------------------------------------------------ parameters
+    input event float param1  [[ name: "Mummer 1 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param2  [[ name: "Mummer 1 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param3  [[ name: "Mummer 2 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param4  [[ name: "Mummer 2 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param5  [[ name: "Mummer 3 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param6  [[ name: "Mummer 3 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param7  [[ name: "Mummer 4 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param8  [[ name: "Mummer 4 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param9  [[ name: "Mummer 5 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param10 [[ name: "Mummer 5 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param11 [[ name: "Mummer 6 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param12 [[ name: "Mummer 6 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param13 [[ name: "Mummer 7 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param14 [[ name: "Mummer 7 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param15 [[ name: "Mummer 8 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param16 [[ name: "Mummer 8 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param17 [[ name: "Mummer 9 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param18 [[ name: "Mummer 9 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param19 [[ name: "Mummer 10 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param20 [[ name: "Mummer 10 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param21 [[ name: "Mummer 11 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param22 [[ name: "Mummer 11 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param23 [[ name: "Mummer 12 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param24 [[ name: "Mummer 12 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param25 [[ name: "Mummer 13 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param26 [[ name: "Mummer 13 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param27 [[ name: "Mummer 14 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param28 [[ name: "Mummer 14 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param29 [[ name: "Mummer 15 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param30 [[ name: "Mummer 15 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param31 [[ name: "Mummer 16 X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param32 [[ name: "Mummer 16 Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param33 [[ name: "Troupe X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param34 [[ name: "Troupe Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param35 [[ name: "Mockery", min: 0.0, max: 1.0, init: 1.0 ]];
+    input event float param36 [[ name: "Shadow", min: 0.0, max: 1.0, init: 0.0 ]];
+    input event float param37 [[ name: "Subject", min: 1.0, max: 8.0, init: 1.0, step: 1.0 ]];
+    input event float param38 [[ name: "Volume", min: -48.0, max: 6.0, init: -6.0, unit: "dB" ]];
+    input event float param39 [[ name: "Base Note", min: 0.0, max: 112.0, init: 36.0, step: 1.0 ]];
+    input event float param40 [[ name: "Voicing", min: 0.0, max: 1.0, init: 0.0, step: 1.0 ]];
+    input event float param41 [[ name: "Choke", min: 5.0, max: 4000.0, init: 250.0, unit: "ms" ]];
+    input event float param42 [[ name: "Tuning", min: 0.0, max: 1.0, init: 0.0, step: 1.0 ]];
+    // number of the troupe (v5.6): AMORPH keeps only parameters; the subjects live on this computer under this number
+    input event float param43 [[ name: "Troupe", min: 0.0, max: 1048576.0, init: 0.0, step: 1.0 ]];
+    // V6.3: the troupe's lacquer (dry/wet over every lacquered pad) and the subject's own joystick
+    input event float param44 [[ name: "Lacquer", min: 0.0, max: 1.0, init: 1.0 ]];
+    input event float param45 [[ name: "Subject X", min: -1.0, max: 1.0, init: 0.0 ]];
+    input event float param46 [[ name: "Subject Y", min: -1.0, max: 1.0, init: 0.0 ]];
+    // (V6.6) the number of the settings record the interface keeps on this computer (pad settings, slots): the host's snapshots
+    // keep parameters only, so this one carries the rest
+    input event float param47 [[ name: "Settings", min: 0.0, max: 1048576.0, init: 0.0, step: 1.0 ]];
+    // (V6.9) where the pitches come from: 0 the analysis, 1 an MTS-ESP master (when one runs)
+    input event float param48 [[ name: "Tuning Source", min: 0.0, max: 1.0, init: 0.0, step: 1.0 ]];
+    // (1.0.1) a ZD scale laid on the master's notes, from the interface: [on (1) / off (0), then for each of the 128 notes 1 to
+    // keep it] — declared after the last parameter so that every parameter keeps its handle (the host's parameter ids)
+    input event float[129] mtsKeep;
+
+    float[34] joy;               // 16 pads × (X, Y), then the subject (V6.3)
+    float lacqGlobal = 1.0f;
+    float popX = 0.0f;
+    float popY = 0.0f;
+    float filiation = 0.0f;      // SHADOW
+    float volumeLin = 0.5011872f;
+    int baseNote = 36;
+    int monoMode = 0;            // 0 crowd (24 voices), 1 solo (two voices)
+    float cutMs = 250.0f;
+
+    void setJoy (int i, float v) { joy.at (i) = clamp (v, -1.0f, 1.0f); }
+    event param1  (float v) { setJoy (0, v); }
+    event param2  (float v) { setJoy (1, v); }
+    event param3  (float v) { setJoy (2, v); }
+    event param4  (float v) { setJoy (3, v); }
+    event param5  (float v) { setJoy (4, v); }
+    event param6  (float v) { setJoy (5, v); }
+    event param7  (float v) { setJoy (6, v); }
+    event param8  (float v) { setJoy (7, v); }
+    event param9  (float v) { setJoy (8, v); }
+    event param10 (float v) { setJoy (9, v); }
+    event param11 (float v) { setJoy (10, v); }
+    event param12 (float v) { setJoy (11, v); }
+    event param13 (float v) { setJoy (12, v); }
+    event param14 (float v) { setJoy (13, v); }
+    event param15 (float v) { setJoy (14, v); }
+    event param16 (float v) { setJoy (15, v); }
+    event param17 (float v) { setJoy (16, v); }
+    event param18 (float v) { setJoy (17, v); }
+    event param19 (float v) { setJoy (18, v); }
+    event param20 (float v) { setJoy (19, v); }
+    event param21 (float v) { setJoy (20, v); }
+    event param22 (float v) { setJoy (21, v); }
+    event param23 (float v) { setJoy (22, v); }
+    event param24 (float v) { setJoy (23, v); }
+    event param25 (float v) { setJoy (24, v); }
+    event param26 (float v) { setJoy (25, v); }
+    event param27 (float v) { setJoy (26, v); }
+    event param28 (float v) { setJoy (27, v); }
+    event param29 (float v) { setJoy (28, v); }
+    event param30 (float v) { setJoy (29, v); }
+    event param31 (float v) { setJoy (30, v); }
+    event param32 (float v) { setJoy (31, v); }
+    event param33 (float v) { popX = clamp (v, -1.0f, 1.0f); }
+    event param34 (float v) { popY = clamp (v, -1.0f, 1.0f); }
+    event param35 (float v) { }                       // Mockery: read by the interface (births)
+    event param36 (float v) { filiation = clamp (v, 0.0f, 1.0f); }
+    event param37 (float v) { }                       // subject slot: read by the interface
+    event param38 (float v) { volumeLin = float (pow (10.0f, clamp (v, -48.0f, 6.0f) / 20.0f)); }
+    event param39 (float v) { baseNote = clamp (int (v + 0.5f), 0, 112); }
+    event param40 (float v) { monoMode = v > 0.5f ? 1 : 0; }
+    event param41 (float v) { cutMs = clamp (v, 5.0f, 4000.0f); }
+    event param42 (float v) { }                       // tuning: read by the interface (births)
+    event param43 (float v) { }                       // troupe number: read by the interface (its subjects on disk)
+    event param44 (float v) { lacqGlobal = clamp (v, 0.0f, 1.0f); }
+    event param45 (float v) { setJoy (32, v); }
+    event param46 (float v) { setJoy (33, v); }
+    event param47 (float v) { }                       // settings record: read by the interface
+    event param48 (float v) { mtsOn = v > 0.5f; }     // (V6.9) the poles on the MTS-ESP master's notes
+
+    event uiRequest (int v) { uiResend = 1; }
+
+    // ------------------------------------------------------------------ constants and memory
+    let MAXLEN = 1048576;        // 2^20 frames (21.8 s at 48 kHz): longest subject
+    let SLOT = 1572864;          // words per mummer slot: 2^20 frames of 24-bit stereo (1.5 words per frame), loop and anatomy included
+    let PK = 2046;               // words per packet (a multiple of 3: packets hold whole 24-bit frame pairs)
+    let NC = 16;                 // pads
+    let NS = 17;                 // slots: the sixteen mummers, then the subject's own (V6.3)
+    let SUBJ = 16;
+    let NV = 32;                 // 24 playable voices + 8 for stolen voices fading out (V6.1: was 2 — a fast trill then
+                                 // restarted a voice still fading, a click)
+    let MAXPOLY = 24;
+    let FS = 48000.0f;
+    // (V6.5) Phalène's 47-tap Kaiser halfband, its even branch ×2 (stopband −94 dB): MASK's folder at twice the rate
+    let HB47 = float[24] (-1.5785167e-05f, 1.7540852e-04f, -7.1489504e-04f, 2.0685514e-03f, -4.9190576e-03f, 1.0253172e-02f,
+                          -1.9459802e-02f, 3.4614360e-02f, -5.9419904e-02f, 1.0271933e-01f, -1.9652977e-01f, 6.3123075e-01f,
+                          6.3123075e-01f, -1.9652977e-01f, 1.0271933e-01f, -5.9419904e-02f, 3.4614360e-02f, -1.9459802e-02f,
+                          1.0253172e-02f, -4.9190576e-03f, 2.0685514e-03f, -7.1489504e-04f, 1.7540852e-04f, -1.5785167e-05f);
+    let AH = 1024;               // anatomy hop
+    let AREC = 32;               // words per anatomy frame
+    let NBANDS = 24;
+    let CTRL = 32;               // pole control period (samples)
+    let KMAX = 24;               // harmonics in FLESH's bank
+    let FULL24 = 8388607.0f;
+
+    float<2>[MAXLEN] parentBuf;
+    int parentLen = 0;
+    int parentFrames = 0;
+    float parentSig = -1.0f;
+
+    int32[26738688] pool;              // 17 slots × SLOT words: mummer (24-bit stereo, 2 frames in 3 words), loop, anatomy, lacquer
+    int[NS] childLen;
+    int[NS] childWords;
+    int[NS] loopStart;
+    int[NS] loopLen;
+    bool[NS] loopSeamless;                 // the loop is the mummer's own sound: entered and left without a fade (v5.5)
+    int[NS] loopWords;
+    int[NS] anaFrames;
+    float[NS] childPeak;
+    bool[NS] childReady;
+    // (V6.1) a mummer's dimensions while it is being received: applied when its reception ends
+    int[NS] pnLen; int[NS] pnLoopLen; int[NS] pnLoopStart; bool[NS] pnSeamless; int[NS] pnAna; float[NS] pnPeak;
+    bool[NS] anaReady;
+    float[NS] childSig;
+    int[NC] padChild;
+    float[NS * 128] childWave;
+    int[NS * 256] marks; int[NS] nMarks; int[NS] gesteLevel;
+    float[NS] gxBody; float[NS] gxMinSeg;              // (V6.8) GESTURE on a struck mummer: its median body, its shortest gap between attacks (frames; 0: not struck)
+    int[NS * 256] gxPk; int[NS] gxPk0; bool[NS] gxOpen; // (V6.8) the loudest sample of each attack, of the opening hit, and whether the mummer opens with a hit
+
+    // playback and ADSR per pad (index NC: the subject)
+    int[NC + 1] pMode; float[NC + 1] pAtk; float[NC + 1] pDec; float[NC + 1] pSus; float[NC + 1] pRel;
+    float[NC + 1] pPL; float[NC + 1] pPR; float[NC + 1] pPW;        // the pad's place (V6.2): gains of its middle, its width
+    float[NC + 1] pA; float[NC + 1] pD; float[NC + 1] pR;          // ms
+    float[NC + 1] pLq;                                               // the pad's lacquer, dry/wet (0: off) (V6.3)
+    float[NC + 1] pGain;                                             // the pad's gain (V6.4): linear, 0 (silence) to 4 (+12 dB)
+    int[NC + 1] pOut; int trackChannels = 0; int trackPairs = 16; float<2>[16] busY;   // (V6.9) the pad's output pair, the track's channels
+    // the pad's Lorenz attractor (V6.3): each new note of a pad goes on from where its last note left it
+    float64[NC + 1] pLx; float64[NC + 1] pLy; float64[NC + 1] pLz; float64[NC + 1] pLs; float[NC + 1] pLt;
+    // (V6.6) …and the phases of its partials' life and of its circulation (they turn at rates of their own now)
+    float[(NC + 1) * 24] pPh; float64[NC + 1] pCph;
+    // (V6.6) the lacquer's motion: the subject's pulse (Hz, 0: none) and the index (1: as in V6.5)
+    float lmBeat = 0.0f; float lmScale = 1.0f;
+
+    // LACQUER data of each slot (V6.4, sent by the brain after the anatomy): the Moonvox timbre CREATED from the subject — its
+    // profile over one turn of its circulation (32 instants × 24 partials, dB relative to the subject) and its mean (the fixed
+    // part), the rate of the circulation, the life of each partial (rate, depth), the subject's formants and how far the
+    // circulation moves them (sublimatio), the relative phase of each partial
+    bool[NS] lqOk; float[NS] lqRate; float[NS] lqSubl;
+    float[NS * 3] lqF; float[NS] lqKap; float[NS * 768] lqTab; float[NS * 24] lqRbar; float[NS * 24] lqLR; float[NS * 24] lqLD; float[NS * 24] lqDc; float[NS * 24] lqDs;
+    float[NS * 24] lqVar;                                           // (V6.6) variance (dB²) of each partial's motion: life + circulation + group
+    float[NS * 24] lqLRt; float[NS] lqRateT;                        // (V6.6) the life and circulation rates with the pulse
+    // HOLD GRAINS of each slot (V6.4, the end of the LACQ block): the held zone, grain length (frames), overlap, envelope
+    // (rise and fall fractions), the zone's period (frames, 0: no pitch), pitch and level life, width, the levels of loop and grains,
+    // the cursor that crosses the zone (grains are read around it)
+    bool[NS] grOk; int[NS] grZs; int[NS] grZl; int[NS] grLen; float[NS] grOv; float[NS] grAtt; float[NS] grDec; float[NS] grPer;
+    float[NS] grJc; float[NS] grJd; float[NS] grW; float[NS] grLoopG; float[NS] grGrainG; float[NS] grNorm; float[NS] grHop;
+    // (V6.5) a held zone (rise = fall): grains COLA-exact on the period grid — flanks of one hop, length a whole number of hops
+    bool[NS] grHeld; float[NS] grLc; float[NS] grAc; float[NS] grDc;
+    int[NS] grScan0; float[NS] grSpd; float[NS] grSpr;      // the cursor crossing the zone: its start, its speed, the spread around it
+
+    // the analysed scale (degrees in cents within the period, 0 first)
+    int scN = 12; float scP = 1200.0f; float scRoot = 261.63f;
+    float[64] scDeg;
+    // (V6.9) the MTS-ESP master: its notes in cents above the tonic, rising (within 1 c counted once), extended beyond both ends
+    // by repeating its outermost 12 intervals
+    bool mtsOn = false; int mtsState = -1; int mtsN = 0; int mtsW = 12; int mtsPer = 12; float mtsSpanLo = 1200.0f; float mtsSpanHi = 1200.0f;
+    float[128] mtsHz; float[128] mtsC; float[180] mtsRaw; int mtsSend = 0;
+    bool mtsMaskOn = false; float[128] mtsMask;     // (1.0) the master's notes of the scale laid on it
+
+    int uiResend = 0;
+    int infoSendK = -1;

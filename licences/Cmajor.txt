@@ -1,0 +1,31 @@
+Cmajor — https://cmajor.dev
+(C) 2024 Cmajor Software Ltd
+
+Charivari is a Cmajor patch. The plugin compiles in the Cmajor C++ API and helper headers, and the Cmajor JavaScript
+helpers for the view.
+
+The Cmajor API headers (include/cmajor/API, include/cmajor/helpers) carry this notice:
+
+  The Cmajor project is subject to commercial or open-source licensing.
+  You may use it under the terms of the GPLv3 (see www.gnu.org/licenses), or
+  visit https://cmajor.dev to learn about our commercial licence options.
+
+  CMAJOR IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, AND ALL WARRANTIES, WHETHER
+  EXPRESSED OR IMPLIED, INCLUDING MERCHANTABILITY AND FITNESS FOR PURPOSE, ARE
+  DISCLAIMED.
+
+The GPLv3 text is in the file LICENSE.
+
+The CLAP plugin helper (cmaj_CLAPPlugin.h, modified by Vox Mira Studio: MTS-ESP client, REAPER track channels, sixteen
+stereo outputs) and the JavaScript helpers (cmaj_api) carry this notice:
+
+  Cmajor may be used under the terms of the ISC license:
+
+  Permission to use, copy, modify, and/or distribute this software for any purpose with or
+  without fee is hereby granted, provided that the above copyright notice and this permission
+  notice appear in all copies. THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL
+  WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+  AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR
+  CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+  WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+  CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.

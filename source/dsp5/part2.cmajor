@@ -1,0 +1,596 @@
+
+    // ------------------------------------------------------------------ the analysed scale
+    // [n, period (cents), tonic (Hz), degrees (cents within the period, rising, 0 first)…]
+    // (V6.6) the lacquer's motion, from the subject's analysis: its pulse when its morphology has one (confidence ≥ 0.45), and
+    // the index that makes the lacquered partials live as much as the subject's own notes
+    event lacqMod (float[4] m)
+    {
+        lmBeat = m[0] >= 0.25f && m[0] <= 8.0f ? m[0] : 0.0f;
+        lmScale = m[1] > 0.0f ? clamp (m[1], 0.05f, 1.0f) : 1.0f;
+        for (int k = 0; k < NS; ++k) lacqRates (k);
+    }
+    // the rates of a slot's motion with the pulse (its partials' life on the nearest division or multiple, its circulation one
+    // turn in 1, 2, 4 … 64 beats nearest its measured rate), or the measured ones without a pulse
+    void lacqRates (int k)
+    {
+        for (int q = 0; q < 24; ++q) { float r = lqLR.at (k * 24 + q); lqLRt.at (k * 24 + q) = lmBeat > 0.0f ? lmBeat * tempoMult (r / lmBeat) : r; }
+        float rc = lqRate.at (k);
+        if (lmBeat > 0.0f) { float n = clamp (float (floor (float (log (lmBeat / max (rc, 0.005f))) * 1.442695f + 0.5f)), 0.0f, 6.0f); rc = lmBeat * float (pow (2.0f, -n)); }
+        lqRateT.at (k) = rc;
+    }
+    event scaleIn (float[64] s)
+    {
+        int n = clamp (int (s[0] + 0.5f), 0, 61);
+        if (n < 1 || s[1] < 50.0f || s[2] < 10.0f) { setScale12 (261.63f); return; }
+        scN = n; scP = s[1]; scRoot = s[2];
+        for (int i = 0; i < n; ++i) scDeg.at (i) = clamp (s.at (3 + i), 0.0f, scP - 1.0f);
+        scDeg.at (0) = 0.0f;
+        for (int i = 1; i < n; ++i) if (scDeg.at (i) <= scDeg.at (i - 1)) scDeg.at (i) = scDeg.at (i - 1) + 1.0f;
+        mtsBuild();                                   // (V6.9) the master's notes, measured from the new tonic
+    }
+    // ------------------------------------------------------------------ (V6.9) the MTS-ESP master
+    event mtsIn (float[180] m)
+    {
+        bool same = true;
+        for (int i = 0; i < 180; ++i) if (m.at (i) != mtsRaw.at (i)) { same = false; break; }
+        if (same) return;
+        mtsRaw = m; mtsState = int (floor (m[0] + 0.5f));
+        for (int i = 0; i < 128; ++i) mtsHz.at (i) = m.at (1 + i);
+        mtsBuild(); mtsSend = 1;
+    }
+    // (1.0) the scale laid on the master: only its notes (Mat: « pour les tunings à 12 notes, toutes les scales de 3 à 12
+    // notes doivent pouvoir être sélectionnées »); off, every note of the master as before
+    event mtsKeep (float[129] k)
+    {
+        bool on = k[0] > 0.5f; bool same = on == mtsMaskOn;
+        for (int i = 0; i < 128; ++i) { float v = k.at (1 + i) > 0.5f ? 1.0f : 0.0f; if (v != mtsMask.at (i)) same = false; mtsMask.at (i) = v; }
+        mtsMaskOn = on;
+        if (! same) mtsBuild();
+    }
+    void mtsBuild()
+    {
+        float[128] c; int n = 0;
+        if (mtsState > 0) for (int i = 0; i < 128; ++i) { float f = mtsHz.at (i); if (f > 1.0f && f < 40000.0f && (! mtsMaskOn || mtsMask.at (i) > 0.5f)) { c.at (n) = centsAbs (f); n += 1; } }
+        for (int i = 1; i < n; ++i)
+        {
+            float x = c.at (i); int j = i - 1;
+            loop { if (j < 0) break; if (c.at (j) <= x) break; c.at (j + 1) = c.at (j); j -= 1; }
+            c.at (j + 1) = x;
+        }
+        int m = 0;
+        for (int i = 0; i < n; ++i) { if (m > 0 && c.at (i) - mtsC.at (m - 1) < 1.0f) continue; mtsC.at (m) = c.at (i); m += 1; }
+        mtsN = m; mtsW = min (12, max (1, m - 1));
+        mtsSpanLo = m >= 2 ? mtsC.at (mtsW) - mtsC.at (0) : 1200.0f;
+        mtsSpanHi = m >= 2 ? mtsC.at (m - 1) - mtsC.at (m - 1 - mtsW) : 1200.0f;
+        if (mtsSpanLo < 50.0f) mtsSpanLo = 1200.0f;
+        if (mtsSpanHi < 50.0f) mtsSpanHi = 1200.0f;
+        int per = 0; for (int i = 0; i < m; ++i) if (mtsC.at (i) >= -0.5f && mtsC.at (i) < 1199.5f) per += 1;
+        mtsPer = max (1, per);
+    }
+    bool useMts() { return mtsOn && mtsState > 0 && mtsN >= 2; }
+    float mtsDeg (int j)
+    {
+        if (j < 0) { int k = (mtsW - 1 - j) / mtsW; return mtsC.at (clamp (j + k * mtsW, 0, mtsN - 1)) - float (k) * mtsSpanLo; }
+        if (j >= mtsN) { int k = (j - (mtsN - 1) + mtsW - 1) / mtsW; return mtsC.at (clamp (j - k * mtsW, 0, mtsN - 1)) + float (k) * mtsSpanHi; }
+        return mtsC.at (j);
+    }
+    int mtsSearch (float c)
+    {
+        int lo = 0; int hi = mtsN - 1;
+        while (lo < hi) { int mid = (lo + hi + 1) / 2; if (mtsC.at (mid) <= c) lo = mid; else hi = mid - 1; }
+        if (lo + 1 < mtsN && mtsC.at (lo + 1) - c < c - mtsC.at (lo)) return lo + 1;
+        return lo;
+    }
+    int mtsNearest (float c)
+    {
+        int j = 0;
+        if (c < mtsC.at (0)) { int k = int (ceil ((mtsC.at (0) - c) / mtsSpanLo)); j = mtsSearch (c + float (k) * mtsSpanLo) - k * mtsW; }
+        else if (c > mtsC.at (mtsN - 1)) { int k = int (ceil ((c - mtsC.at (mtsN - 1)) / mtsSpanHi)); j = mtsSearch (c - float (k) * mtsSpanHi) + k * mtsW; }
+        else j = mtsSearch (c);
+        float d = abs (mtsDeg (j) - c);
+        for (int it = 0; it < 6; ++it)
+        {
+            float dl = abs (mtsDeg (j - 1) - c); float du = abs (mtsDeg (j + 1) - c);
+            if (dl < d) { j -= 1; d = dl; } else if (du < d) { j += 1; d = du; } else break;
+        }
+        return j;
+    }
+    int degPerOct() { return useMts() ? mtsPer : scN; }
+    void setScale12 (float root)
+    {
+        scN = 12; scP = 1200.0f; scRoot = root;
+        for (int i = 0; i < 12; ++i) scDeg.at (i) = 100.0f * float (i);
+        mtsBuild();
+    }
+    float centsAbs (float f) { return 1731.2340491f * float (log (max (f, 1.0f) / scRoot)); }     // 1200 / ln 2
+    int floorDiv (int a, int b) { int q = a / b; if (q * b > a) q -= 1; return q; }
+    float degCents (int i)
+    {
+        if (useMts()) return mtsDeg (i);
+        int o = floorDiv (i, scN);
+        return float (o) * scP + scDeg.at (i - o * scN);
+    }
+    // nearest degree (binary search within the period)
+    int nearestIdx (float c)
+    {
+        if (useMts()) return mtsNearest (c);
+        int o = int (floor (c / scP));
+        float r = c - float (o) * scP;
+        int lo = 0; int hi = scN - 1;
+        while (lo < hi) { int mid = (lo + hi + 1) / 2; if (scDeg.at (mid) <= r) lo = mid; else hi = mid - 1; }
+        float dLo = r - scDeg.at (lo);
+        float up = lo + 1 < scN ? scDeg.at (lo + 1) : scP;
+        if (up - r < dLo) return lo + 1 < scN ? o * scN + lo + 1 : (o + 1) * scN;
+        return o * scN + lo;
+    }
+    float hzOfCents (float c) { return scRoot * float (exp (c * 0.00057762265f)); }                  // ln 2 / 1200
+    float snapHz (float f) { return hzOfCents (degCents (nearestIdx (centsAbs (f)))); }
+
+    // ------------------------------------------------------------------ a pad's playback and ADSR
+    // [pad (−1: the subject), mode (0 one-shot, 1 hold), attack ms, decay ms, sustain 0..1, release ms, pan −1..1,
+    //  lacquer dry/wet 0..1 (0: off, V6.3), gain dB (V6.4: −60 = silence, up to +12), (spare)]
+    event padPlay (float[10] p)
+    {
+        int i = int (p[0] + 0.5f + 1.0f) - 1;
+        if (i < -1 || i >= NC) return;
+        int q = i < 0 ? NC : i;
+        setPlay (q, p[1] > 0.5f ? 1 : 0, p[2], p[3], p[4], p[5]);
+        setPan (q, p[6]);
+        pLq.at (q) = clamp (p[7], 0.0f, 1.0f);
+        float gd = clamp (p[8], -60.0f, 12.0f);
+        pGain.at (q) = gd <= -59.9f ? 0.0f : float (pow (10.0f, gd * 0.05f));
+        pOut.at (q) = clamp (int (floor (p[9] + 0.5f)), 0, 15);           // (V6.9) its output pair
+    }
+    // (V6.9) the channels of the host's track (0: not known)
+    event trackCh (float n)
+    {
+        trackChannels = clamp (int (floor (n + 0.5f)), 0, 512);
+        trackPairs = trackChannels >= 2 ? min (16, trackChannels / 2) : 16;
+    }
+    int busOf (int pad)
+    {
+        int q = pad < 0 ? NC : min (pad, NC);
+        int b = pOut.at (q);
+        return b < trackPairs ? b : 0;
+    }
+    // (V6.2) the pad's place: a −4.5 dB pan law applied to the mummer's middle (L+R)/2, normalised so that the centre leaves
+    // it untouched (each side then reaches +4.5 dB on its own speaker); its own width (L−R)/2 narrows towards a side —
+    // the mummer moves as one player
+    void setPan (int q, float pan)
+    {
+        float x = clamp (pan, -1.0f, 1.0f);
+        float u = 0.5f * (x + 1.0f);
+        pPL.at (q) = float (sqrt (max (0.0f, float (cos (0.5f * float (pi) * u)) * (1.0f - u)))) / 0.59460356f;
+        pPR.at (q) = float (sqrt (max (0.0f, float (sin (0.5f * float (pi) * u)) * u))) / 0.59460356f;
+        pPW.at (q) = 1.0f - abs (x);
+    }
+    void setPlay (int q, int mode, float a, float d, float s, float r)
+    {
+        pMode.at (q) = mode;
+        pA.at (q) = clamp (a, 0.0f, 2000.0f); pD.at (q) = clamp (d, 5.0f, 4000.0f);
+        pSus.at (q) = clamp (s, 0.0f, 1.0f); pR.at (q) = clamp (r, 5.0f, 8000.0f);
+        float sr = float (processor.frequency);
+        pAtk.at (q) = pA.at (q) > 0.5f ? 1.0f / (pA.at (q) * 0.001f * sr) : 1.0f;                     // linear
+        pDec.at (q) = 1.0f - float (exp (-1.0f / (pD.at (q) * 0.00025f * sr)));                         // τ = D / 4
+        pRel.at (q) = float (exp (-1.0f / (pR.at (q) * 0.0002f * sr)));                                // −43 dB after R
+    }
+
+    // ------------------------------------------------------------------ reception (acknowledged packets)
+    // Packets of 2046 words; grouped acks (at most one every 128 frames): first missing packet + 1024 × (last received
+    // + 1), so holes show and only the lost packet is sent again.
+    struct StreamChunk { int start; int count; int[2048] d; }
+    int rxTarget = -2; int rxFrames = 0; int rxCount = 0; int rxActive = 0; int rxNext = 0; int rxDone = 0;
+    float rxPeak = 1.0f;
+    bool[1024] rxGot;
+    int ackDirty = 0; int rxHigh = 0;
+    int rxSerial = 0;            // stream serial (0..15), echoed in every ack so a late ack of the previous stream is ignored
+    int ackValue() { return rxNext + 1024 * rxHigh + 1048576 * rxSerial; }
+
+    int words24 (int n) { return 3 * ((n + 1) / 2); }
+
+    // header: [target (−1 subject, 0..15 mummer) + 64 × serial, words, peak, hold point, loop frames, signature,
+    //          anatomy frames, frames]
+    event streamHeader (float[8] h)
+    {
+        int raw = int (floor (h[0] + 0.5f));
+        rxSerial = clamp ((raw + 1) / 64, 0, 15);
+        int tg = raw - 64 * rxSerial;
+        rxTarget = clamp (tg, -1, NS - 1);
+        rxFrames = clamp (int (h[1]), 0, SLOT);
+        rxPeak = max (h[2], 1e-9f);
+        rxCount = 0; rxNext = 0;
+        for (int q = 0; q < 1024; ++q) rxGot.at (q) = false;
+        ackDirty = 0; rxHigh = 0;
+        rxActive = rxFrames > 0 ? 1 : 0;
+        if (rxTarget < 0)
+        {
+            for (int v = 0; v < NV; ++v) if (voices.at (v).active && voices.at (v).child < 0) startCut (v, 5.0f);
+            parentLen = 0; parentSig = h[5];
+            parentFrames = clamp (int (h[7]), 0, min (MAXLEN, 2 * (rxFrames / 3)));
+        }
+        else
+        {
+            int k = rxTarget;
+            int n = max (0, int (h[7]));
+            int ll = max (0, int (h[4]));
+            int af = max (0, int (h[6]));
+            if (words24 (n) + words24 (ll) > rxFrames) { n = 0; ll = 0; }
+            if (words24 (n) + words24 (ll) + af * AREC > rxFrames) af = 0;
+            for (int v = 0; v < NV; ++v) if (voices.at (v).active && voices.at (v).child == k) startCut (v, 5.0f);
+            childReady.at (k) = false; anaReady.at (k) = false; childSig.at (k) = h[5];
+            // (V6.1) the new mummer's dimensions wait for the end of its reception: the voices fading out of the old one
+            // (5 ms) keep reading it at its own length and level — its new level applied at once made a step, a shorter
+            // length stopped them dead
+            pnAna.at (k) = af; pnLen.at (k) = n; pnLoopLen.at (k) = ll;
+            // a negative start marks a loop cut from the mummer's own sound (start = −value − 1)
+            float ls = h[3];
+            pnSeamless.at (k) = ls < 0.0f;
+            pnLoopStart.at (k) = clamp (int (ls < 0.0f ? -ls - 1.0f : ls), 0, max (0, n - 1));
+            pnPeak.at (k) = rxPeak;
+        }
+        rxAck <- ackValue();
+    }
+    event streamChunk (StreamChunk c)
+    {
+        if (rxActive == 0 || c.start < 0 || c.start >= rxFrames || (c.start % PK) != 0) return;
+        int q = c.start / PK;
+        if (q >= 1024) return;
+        if (rxGot.at (q)) { ackDirty = 1; return; }   // packet already here (resend): the grouped ack will follow
+        rxGot.at (q) = true; rxHigh = max (rxHigh, q + 1);
+        int nChunks = (rxFrames + PK - 1) / PK;
+        while (rxNext < nChunks && rxGot.at (rxNext)) rxNext += 1;
+        if (rxNext >= nChunks) { rxAck <- ackValue(); ackDirty = 0; } else ackDirty = 1;
+        int n = min (c.count, PK);
+        if (rxTarget < 0)
+        {
+            // the subject is decoded straight into its float buffer (packets hold whole frame pairs)
+            float sc = rxPeak / FULL24;
+            for (int i = 0; i + 2 < n; i += 3)
+            {
+                int w = c.start + i;
+                if (w + 2 >= rxFrames + 2) break;
+                int f = 2 * (w / 3);
+                int w0 = c.d.at (i); int w1 = c.d.at (i + 1); int w2 = c.d.at (i + 2);
+                if (f < parentFrames) parentBuf.at (f) = float<2> (float (w0 >> 8), float ((((w0 & 255) << 24) | (((w1 >> 16) & 65535) << 8)) >> 8)) * sc;
+                if (f + 1 < parentFrames) parentBuf.at (f + 1) = float<2> (float ((((w1 & 65535) << 16) | (((w2 >> 24) & 255) << 8)) >> 8), float ((w2 << 8) >> 8)) * sc;
+            }
+        }
+        else
+        {
+            int base = rxTarget * SLOT;
+            for (int i = 0; i < n; ++i)
+            {
+                int p = c.start + i;
+                if (p >= rxFrames) break;
+                pool.at (base + p) = c.d.at (i);
+            }
+        }
+        rxCount += max (0, min (n, rxFrames - c.start));
+        if (rxCount >= rxFrames) { rxActive = 0; rxDone = 1; }
+    }
+    // [0, …]: new family (new subject): every voice fades in 10 ms, pads stay silent until their mummer arrives;
+    // [1, k, …]: mummer k is about to be replaced, its voices fade in 10 ms
+    event popReset (float[4] p)
+    {
+        if (p[0] < 0.5f)
+        {
+            for (int k = 0; k < NS; ++k) { childReady.at (k) = false; anaReady.at (k) = false; childSig.at (k) = -1.0f; }
+            for (int v = 0; v < NV; ++v) if (voices.at (v).active) startCut (v, 10.0f);
+        }
+        else
+        {
+            int k = clamp (int (p[1]), 0, NS - 1);
+            for (int v = 0; v < NV; ++v) if (voices.at (v).active && voices.at (v).child == k) startCut (v, 10.0f);
+        }
+    }
+
+    // end of reception: subject ready, or mummer playable at once (thumbnail, GESTURE marks, reference pitch)
+    void rxFinished()
+    {
+        if (rxTarget < 0) { parentLen = parentFrames; return; }
+        int k = rxTarget;
+        anaFrames.at (k) = pnAna.at (k);
+        childLen.at (k) = pnLen.at (k); childWords.at (k) = words24 (pnLen.at (k));
+        loopLen.at (k) = pnLoopLen.at (k); loopWords.at (k) = words24 (pnLoopLen.at (k));
+        loopSeamless.at (k) = pnSeamless.at (k); loopStart.at (k) = pnLoopStart.at (k);
+        childPeak.at (k) = pnPeak.at (k);
+        int L = childLen.at (k);
+        int chunk = max (1, L / 128);
+        for (int q = 0; q < 128; ++q)
+        {
+            float m = 0.0f;
+            for (int i = q * chunk; i < min (L, (q + 1) * chunk); i += 8) { float<2> x = childFrame (k, i); m = max (m, max (abs (x[0]), abs (x[1]))); }
+            childWave.at (k * 128 + q) = m;
+        }
+        readAnatomy (k);
+        childReady.at (k) = true;
+        sendChildInfo (k);
+    }
+
+    // ------------------------------------------------------------------ anatomy (measured by the brain, read here)
+    // 32 words per 1024-frame hop: 0 f0×16, 1 confidence×1000, 2 loudness dB×100 (rel. to peak), 3-5 F1 F2 F3 Hz,
+    // 6 events (16: GESTURE mark), 7 source position in the subject, 8-31 envelope dB×100 (24 bands 60 Hz–16 kHz)
+    float[NS] childRefHz;
+    int aw (int k, int j, int w)
+    {
+        int nf = anaFrames.at (k);
+        if (nf <= 0) return 0;
+        int jj = clamp (j, 0, nf - 1);
+        return pool.at (k * SLOT + childWords.at (k) + loopWords.at (k) + jj * AREC + w);
+    }
+    float aF0 (int k, int j) { return float (aw (k, j, 0)) * 0.0625f; }
+    float aConf (int k, int j) { return float (aw (k, j, 1)) * 0.001f; }
+    float aLoud (int k, int j) { return float (aw (k, j, 2)) * 0.01f; }
+    float aFormant (int k, int j, int q) { return float (aw (k, j, 3 + q)); }
+    // envelope (relative dB) at the frequency whose log is lnF
+    float aEnvLn (int k, int j, float lnF)
+    {
+        float x = clamp ((lnF - 4.0943446f) * 4.1174f, 0.0f, 23.0f);        // 23 · ln(f/60) / ln(16000/60)
+        int b = min (int (x), 22); float t = x - float (b);
+        return 0.01f * (float (aw (k, j, 8 + b)) * (1.0f - t) + float (aw (k, j, 9 + b)) * t);
+    }
+    void readAnatomy (int k)
+    {
+        int nf = anaFrames.at (k);
+        nMarks.at (k) = 0; gesteLevel.at (k) = 0;
+        if (nf <= 0) { childRefHz.at (k) = 220.0f; anaReady.at (k) = false; return; }
+        int n = 0; int evAll = 0;          // events of the marked frames
+        float lf = 0.0f; int cf = 0;
+        for (int j = 0; j < nf; ++j)
+        {
+            int ev = aw (k, j, 6);
+            if ((ev & 16) != 0 && n < 256 && j * AH < childLen.at (k))
+            {
+                // an attack keeps its exact sample (offset to the frame + 512 in bits 8-17); other events sit on the frame
+                int st = (ev >> 8) & 1023;
+                int m = max (0, j * AH + (st != 0 ? st - 512 : 0));
+                if (n > 0) m = max (m, marks.at (k * 256 + n - 1) + 1);
+                marks.at (k * 256 + n) = m; n += 1; evAll = evAll | ev;
+            }
+            float f = aF0 (k, j);
+            if (aConf (k, j) >= 0.5f && f > 30.0f && f < 2000.0f) { lf += float (log (f)); cf += 1; }
+        }
+        nMarks.at (k) = n;
+        gesteLevel.at (k) = n == 0 ? 4 : ((evAll & 3) != 0 ? 1 : ((evAll & 4) != 0 ? 2 : 3));
+        // (V6.8) GESTURE on a STRUCK mummer (Mat: « sur une percussion simple … le sample part du silence, et si les notes MIDI
+        // sont courtes, il n'atteint jamais le corps du son »): read backwards, a segment starts from its END — silence when
+        // the segment dies out before the next attack (measured: t_d_kik_05, its second segment ends at −69 dB, 64 dB under
+        // its hit). A segment from an attack to the next (or the whole mummer when it has no marks) is STRUCK when it ends 20
+        // dB under its loudest; the mummer is struck when half its segments at least are — and, without marks, when it also
+        // opens with its loudest (one of its first three frames within 3 dB of it: a hit, not a sustained note faded in).
+        // Its BODY: from the attack's peak to the first frame after it that falls 20 dB under it. Kept: the median body of
+        // the struck segments and the shortest room between a peak and the next onset (no swell may outlast the next attack)
+        gxBody.at (k) = 0.0f; gxMinSeg.at (k) = 0.0f; gxOpen.at (k) = false;
+        {
+            int lev = gesteLevel.at (k);
+            if (lev == 1 || lev == 4)
+            {
+                int ns = lev == 4 ? 1 : n; int nSeg = 0; int nSt = 0;
+                int[256] jeA; bool[256] stA;
+                for (int i = 0; i < ns; ++i)
+                {
+                    int a = lev == 4 ? 0 : marks.at (k * 256 + i);
+                    int b = (lev == 4 || i + 1 >= n) ? childLen.at (k) : marks.at (k * 256 + i + 1);
+                    int j0 = a / AH; int j1 = min (nf - 1, (b - 1) / AH);
+                    jeA.at (i) = j1 + 1; stA.at (i) = false;
+                    if (j1 >= j0 && b > a)
+                    {
+                        int jp = j0;
+                        for (int j = j0; j <= j1; ++j) if (aLoud (k, j) > aLoud (k, jp)) jp = j;
+                        float pk = aLoud (k, jp);
+                        int je = j1 + 1;
+                        for (int j = j1; j > jp; --j) if (aLoud (k, j) < pk - 20.0f) je = j;
+                        jeA.at (i) = je;
+                        nSeg += 1;
+                        bool struck = aLoud (k, j1) < pk - 20.0f;
+                        if (lev == 4)
+                        {
+                            bool opens = false;
+                            for (int j = 0; j <= min (2, nf - 1); ++j) if (aLoud (k, j) >= pk - 3.0f) opens = true;
+                            struck = struck && opens;
+                        }
+                        stA.at (i) = struck;
+                        if (struck) nSt += 1;
+                    }
+                }
+                if (nSeg > 0 && 2 * nSt >= nSeg)
+                {
+                    int L = childLen.at (k);
+                    // the swell lands on the attack's loudest sample (within 50 ms of its onset, half the gap to the next at
+                    // most): read backwards to it, then forwards from it, the sound turns round on its peak — landing on the
+                    // onset, the swell's reversed rise and the attack's own rise left a hole between two peaks (measured on
+                    // t_d_kik_05's third hit: −74 dB for 10 ms, the two peaks 50 ms apart)
+                    for (int i = 0; i < n; ++i)
+                    {
+                        int a = marks.at (k * 256 + i);
+                        int e = i + 1 < n ? marks.at (k * 256 + i + 1) : L;
+                        int w = min (2400, max (2, (e - a) / 2));
+                        int best = a; float bv = -1.0f;
+                        for (int q = a; q < min (L - 1, a + w); q += 2) { float<2> x = childFrame (k, q); float v = abs (x[0]) + abs (x[1]); if (v > bv) { bv = v; best = q; } }
+                        gxPk.at (k * 256 + i) = best;
+                    }
+                    // the opening: a mummer without marks opens with its hit; one whose first mark comes later than 30 ms opens
+                    // with a hit too when it sounds there within 20 dB of its loudest (not a silence or a breath before it)
+                    {
+                        int e = n > 0 ? marks.at (k * 256) : L;
+                        int best = 0; float bv = -1.0f;
+                        for (int q = 0; q < min (L - 1, min (e, 3 * AH)); q += 2) { float<2> x = childFrame (k, q); float v = abs (x[0]) + abs (x[1]); if (v > bv) { bv = v; best = q; } }
+                        gxPk0.at (k) = best;
+                        float gm = 0.0f; for (int q = 0; q < 128; ++q) gm = max (gm, childWave.at (k * 128 + q));
+                        gxOpen.at (k) = n == 0 || (e > 1440 && 0.5f * bv >= 0.1f * gm);
+                    }
+                    // the body of each struck segment, from its peak to where it falls 20 dB under it (5 ms blocks of the
+                    // mummer itself: the 21 ms frames placed the end of Bass_Lindrum_09's body at −34 dB); the room between a
+                    // peak and the next onset (no swell may outlast it)
+                    float[256] bl; int nb = 0;
+                    float minGap = float (L);
+                    for (int i = 0; i < ns; ++i)
+                    {
+                        float pkPos = float (lev == 4 ? gxPk0.at (k) : gxPk.at (k * 256 + i));
+                        if (stA.at (i) && nb < 256)
+                        {
+                            int p0 = int (pkPos);
+                            int e = min (L - 1, jeA.at (i) * AH + AH);
+                            if (lev == 1 && i + 1 < n) e = min (e, marks.at (k * 256 + i + 1));
+                            float ref = 0.0f; int q = p0; int be = e;
+                            for (int m = 0; q + 240 <= e; ++m)
+                            {
+                                float en = 0.0f;
+                                for (int t = q; t < q + 240; t += 2) { float<2> x = childFrame (k, t); en += x[0] * x[0] + x[1] * x[1]; }
+                                ref = max (ref, en);                                           // (its loudest block so far)
+                                if (m > 0 && en < 0.01f * ref) { be = q; break; }
+                                q += 240;
+                            }
+                            bl.at (nb) = float (max (240, be - p0)); nb += 1;
+                        }
+                        if (lev == 1 && i + 1 < n) minGap = min (minGap, float (marks.at (k * 256 + i + 1)) - pkPos);
+                    }
+                    if (n > 0 && gxOpen.at (k)) minGap = min (minGap, float (marks.at (k * 256) - gxPk0.at (k)));
+                    for (int i = 1; i < nb; ++i)
+                    {
+                        float v = bl.at (i); int j = i - 1;
+                        while (j >= 0 && bl.at (j) > v) { bl.at (j + 1) = bl.at (j); j -= 1; }
+                        bl.at (j + 1) = v;
+                    }
+                    if (nb > 0 && minGap > 48.0f)
+                    {
+                        gxBody.at (k) = bl.at (nb / 2);
+                        gxMinSeg.at (k) = minGap;
+                    }
+                    else gxOpen.at (k) = false;
+                }
+            }
+        }
+        float hz = 0.0f;
+        if (cf > 0) hz = float (exp (lf / float (cf)));
+        else
+        {
+            // no pitch: the strongest band of the average envelope over the sounding frames
+            float bestV = -1e9f; int bb = 6;
+            for (int b = 2; b < NBANDS; ++b)
+            {
+                float s = 0.0f; int c = 0;
+                for (int j = 0; j < nf; j += 2) if (aLoud (k, j) > -40.0f) { s += float (aw (k, j, 8 + b)); c += 1; }
+                float m = c > 0 ? s / float (c) : -1e9f;
+                if (m > bestV) { bestV = m; bb = b; }
+            }
+            hz = 60.0f * float (pow (266.6667f, float (bb) / 23.0f));
+        }
+        childRefHz.at (k) = clamp (hz, 30.0f, 2000.0f);
+        anaReady.at (k) = true;
+        readLacquer (k);
+    }
+
+    // ------------------------------------------------------------------ the lacquer's data (V6.3)
+    // (V6.4) 896 words after the anatomy: 'LACQ', version 3 — the Moonvox timbre the brain CREATED from the subject (laque.js):
+    // [7] circulation rate (Hz ×1000) [9..11] formants F1–F3 (Hz, 0: none) [12] κ (×10000) [14] sublimatio (×1000) [16..39] rate of each
+    // partial's life (Hz ×1000) [40..63] its depth (×1000) [64..87] relative phase Δ_k (rad ×10000) [96..863] the timbre's
+    // profile over a turn of its circulation, 32 instants × 24 partials (dB ×100, relative to the subject) ; [864..895] 'GRAN'
+    // (grains.js): zone start, zone length, grain length (frames), overlap ×100, rise / fall fractions ×1000, period (frames ×100),
+    // pitch life (cents ×100), level life (dB ×100), width ×1000, loop level, grain level (dB ×100), the cursor's start in the
+    // zone (frames), its speed (×1000), the spread around it (frames)
+    void readLacquer (int k)
+    {
+        lqOk.at (k) = false; grOk.at (k) = false;
+        int off = childWords.at (k) + loopWords.at (k) + max (0, anaFrames.at (k)) * AREC;
+        if (off + 896 > SLOT) return;
+        int b = k * SLOT + off;
+        if (pool.at (b) != 1279345489 || pool.at (b + 1) != 3) return;          // 'LACQ', version 3
+        lqRate.at (k) = clamp (float (pool.at (b + 7)) * 0.001f, 0.01f, 4.0f);
+        for (int q = 0; q < 3; ++q) lqF.at (k * 3 + q) = pool.at (b + 9 + q) <= 0 ? 0.0f : clamp (float (pool.at (b + 9 + q)), 80.0f, 12000.0f);   // 0: the subject has no such formant
+        lqKap.at (k) = clamp (float (pool.at (b + 12)) * 0.0001f, 0.001f, 0.1f);
+        lqSubl.at (k) = clamp (float (pool.at (b + 14)) * 0.001f, 0.0f, 1.0f);
+        for (int q = 0; q < 24; ++q)
+        {
+            lqLR.at (k * 24 + q) = clamp (float (pool.at (b + 16 + q)) * 0.001f, 0.1f, 15.0f);
+            lqLD.at (k * 24 + q) = clamp (float (pool.at (b + 40 + q)) * 0.001f, 0.0f, 0.9f);
+            float d = float (pool.at (b + 64 + q)) * 0.0001f;
+            lqDc.at (k * 24 + q) = float (cos (d)); lqDs.at (k * 24 + q) = float (sin (d));
+            float m = 0.0f;
+            for (int p = 0; p < 32; ++p) { float v = clamp (float (pool.at (b + 96 + p * 24 + q)) * 0.01f, -12.0f, 12.0f); lqTab.at (k * 768 + p * 24 + q) = v; m += v; }
+            lqRbar.at (k * 24 + q) = m / 32.0f;
+            // (V6.6) the variance (dB²) of this partial's motion: its life (1 + LD·sin θ, over a turn of θ) and its circulation
+            // (the table around its mean) — for the colour kept when the index is reduced (lacquerControl)
+            {
+                float rb = m / 32.0f; float c2 = 0.0f;
+                for (int p = 0; p < 32; ++p) { float v = lqTab.at (k * 768 + p * 24 + q) - rb; c2 += v * v; }
+                float la = 0.0f; float lb = 0.0f; float ld = lqLD.at (k * 24 + q);
+                for (int p = 0; p < 64; ++p) { float v = 20.0f * float (log10 (max (1.0e-3f, 1.0f + ld * float (sin (float (twoPi) * (float (p) + 0.5f) / 64.0f))))); la += v; lb += v * v; }
+                la /= 64.0f;
+                lqVar.at (k * 24 + q) = c2 / 32.0f + max (0.0f, lb / 64.0f - la * la) + 0.094f;
+            }
+        }
+        lqOk.at (k) = true;
+        lacqRates (k);
+        int g = b + 864;
+        if (pool.at (g) == 1196573006 && pool.at (g + 1) == 1)                  // 'GRAN', version 1
+        {
+            int zs = pool.at (g + 2); int zl = pool.at (g + 3); int ln = pool.at (g + 4);
+            if (zs >= 0 && zl > 64 && ln > 64 && zs + zl <= childLen.at (k))
+            {
+                grZs.at (k) = zs; grZl.at (k) = zl; grLen.at (k) = min (ln, zl - 8);
+                grOv.at (k) = clamp (float (pool.at (g + 5)) * 0.01f, 1.0f, 8.0f);
+                grAtt.at (k) = clamp (float (pool.at (g + 6)) * 0.001f, 0.02f, 0.98f);
+                grDec.at (k) = clamp (float (pool.at (g + 7)) * 0.001f, 0.02f, 0.98f);
+                if (grAtt.at (k) + grDec.at (k) > 1.0f) { float sc = 1.0f / (grAtt.at (k) + grDec.at (k)); grAtt.at (k) *= sc; grDec.at (k) *= sc; }
+                grPer.at (k) = clamp (float (pool.at (g + 8)) * 0.01f, 0.0f, 4800.0f);
+                grJc.at (k) = clamp (float (pool.at (g + 9)) * 0.01f, 0.0f, 30.0f);
+                grJd.at (k) = clamp (float (pool.at (g + 10)) * 0.01f, 0.0f, 6.0f);
+                grW.at (k) = clamp (float (pool.at (g + 11)) * 0.001f, 0.0f, 0.9f);
+                grLoopG.at (k) = float (pow (10.0f, clamp (float (pool.at (g + 12)) * 0.01f, -40.0f, 0.0f) * 0.05f));
+                grGrainG.at (k) = float (pow (10.0f, clamp (float (pool.at (g + 13)) * 0.01f, -40.0f, 12.0f) * 0.05f));
+                grScan0.at (k) = clamp (pool.at (g + 14), 0, zl);
+                grSpd.at (k) = clamp (float (pool.at (g + 15)) * 0.001f, 0.0f, 2.0f);
+                grSpr.at (k) = clamp (float (pool.at (g + 16)), 0.0f, float (zl));
+                // the onsets: every length / overlap, on a whole number of periods when the zone has a pitch (the grains then add
+                // in phase, like PSOLA marks); the sum of the overlapping grains brought back to the zone's level: in phase the
+                // amplitudes add, otherwise the powers
+                float hop = float (grLen.at (k)) / grOv.at (k);
+                float pe = grPer.at (k);
+                if (pe > 1.0f) hop = max (1.0f, float (int (hop / pe + 0.5f))) * pe;
+                grHop.at (k) = max (16.0f, hop);
+                float ov = float (grLen.at (k)) / grHop.at (k);
+                float ad = grAtt.at (k) + grDec.at (k), mw = 1.0f - 0.5f * ad, mw2 = 1.0f - 0.625f * ad;
+                grNorm.at (k) = pe > 1.0f ? 1.0f / max (1.0f, ov * mw) : 1.0f / float (sqrt (max (1.0f, ov * mw2)));
+                // (V6.5) the overlap-add summed to a constant only by chance: the hop snapped to whole periods, a length that is not a
+                // whole number of hops and a static normaliser left a ripple at the grain rate — 0.8 dB (Hann, overlap 2.5) to 5.4 dB.
+                // A HELD zone (rise = fall) now has flanks of exactly one hop and a length of a whole number of hops (≥ 2): the
+                // windows sum to (overlap − 1) everywhere, exactly; a struck zone keeps its shape (each grain is a strike)
+                grHeld.at (k) = abs (grAtt.at (k) - grDec.at (k)) < 0.05f;
+                grLc.at (k) = float (grLen.at (k)); grAc.at (k) = grAtt.at (k); grDc.at (k) = grDec.at (k);
+                if (grHeld.at (k) && pe > 1.0f)
+                {
+                    float ovI = max (2.0f, float (int (ov + 0.5f)));
+                    float lc = ovI * grHop.at (k);
+                    if (lc > float (zl - 8)) { ovI = max (2.0f, float (int (float (zl - 8) / grHop.at (k)))); lc = ovI * grHop.at (k); }
+                    grLc.at (k) = lc; grAc.at (k) = 1.0f / ovI; grDc.at (k) = 1.0f / ovI;
+                    grNorm.at (k) = 1.0f / max (1.0f, ovI - 1.0f);
+                }
+                grOk.at (k) = true;
+            }
+        }
+    }
+
+    // one 24-bit stereo frame from a slot (two frames share three words)
+    float<2> frame24 (int t, int i, float sc)
+    {
+        if ((i & 1) == 0)
+        {
+            int w0 = pool.at (t); int w1 = pool.at (t + 1);
+            return float<2> (float (w0 >> 8), float ((((w0 & 255) << 24) | (((w1 >> 16) & 65535) << 8)) >> 8)) * sc;
+        }
+        int w1 = pool.at (t + 1); int w2 = pool.at (t + 2);
+        return float<2> (float ((((w1 & 65535) << 16) | (((w2 >> 24) & 255) << 8)) >> 8), float ((w2 << 8) >> 8)) * sc;
+    }
+    float<2> childFrame (int k, int i)
+    {
+        if (i < 0 || i >= childLen.at (k)) return float<2> (0.0f);
+        return frame24 (k * SLOT + 3 * (i / 2), i, childPeak.at (k) / FULL24);
+    }
+    float<2> loopFrame (int k, int i)
+    {
+        int ll = loopLen.at (k);
+        if (ll <= 0) return float<2> (0.0f);
+        int j = i % ll; if (j < 0) j += ll;
+        return frame24 (k * SLOT + childWords.at (k) + 3 * (j / 2), j, childPeak.at (k) / FULL24);
+    }
