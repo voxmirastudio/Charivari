@@ -28,6 +28,9 @@ project("${CMAJ_CMAKE_PROJECT_NAME}" VERSION "${CMAJ_TARGET_PATCH_VERSION}" LANG
 
 # (1.0.1, Vox Mira Studio) Linux: the plugins are shared objects that link static libraries of clap-wrapper and the VST 3 SDK
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# Windows: the C++ runtime linked statically, as clap-wrapper builds its libraries (the VST3 would not link otherwise, and
+# neither plugin then needs Microsoft's Visual C++ redistributable on the user's machine)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Vox Mira Studio: clap-wrapper turns Objective-C/C++ on in its own folder only; the VST3 and AU targets made here need it too
 if (APPLE)

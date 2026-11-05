@@ -44,8 +44,14 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          cmake -S clap_project -B build -G "Visual Studio 17 2022" -A x64 -DCLAP_INCLUDE_PATH="$PWD/deps/clap/include" -DCLAP_WRAPPER_PATH="$PWD/deps/clap-wrapper" -DVST3_SDK_ROOT="$PWD/deps/vst3sdk"
-          cmake --build build --config Release --target Charivari Charivari_vst3 --parallel
+          set -o pipefail
+          cmake -S clap_project -B build -G "Visual Studio 17 2022" -A x64 -DCLAP_INCLUDE_PATH="$PWD/deps/clap/include" -DCLAP_WRAPPER_PATH="$PWD/deps/clap-wrapper" -DVST3_SDK_ROOT="$PWD/deps/vst3sdk" 2>&1 | tee build_windows.log
+          cmake --build build --config Release --target Charivari Charivari_vst3 --parallel -- /nologo /v:minimal 2>&1 | tee -a build_windows.log
+      - name: Errors of the build, as annotations (readable without signing in)
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "error [A-Z]+[0-9]+|fatal error|CMake Error|: error" build_windows.log | sed 's/^ *//' | awk '!seen[$0]++' | head -10 | while IFS= read -r l; do echo "::error::${l:0:1000}"; done || true
       - name: Load and play (no window)
         shell: bash
         run: |
