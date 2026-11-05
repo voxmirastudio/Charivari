@@ -46,7 +46,7 @@ jobs:
         run: |
           set -o pipefail
           cmake -S clap_project -B build -G "Visual Studio 17 2022" -A x64 -DCLAP_INCLUDE_PATH="$PWD/deps/clap/include" -DCLAP_WRAPPER_PATH="$PWD/deps/clap-wrapper" -DVST3_SDK_ROOT="$PWD/deps/vst3sdk" 2>&1 | tee build_windows.log
-          cmake --build build --config Release --target Charivari Charivari_vst3 --parallel -- /nologo /v:minimal 2>&1 | tee -a build_windows.log
+          cmake --build build --config Release --target Charivari Charivari_vst3 --parallel -- -nologo -v:minimal 2>&1 | tee -a build_windows.log
       - name: Errors of the build, as annotations (readable without signing in)
         if: failure()
         shell: bash
@@ -62,14 +62,14 @@ jobs:
         shell: pwsh
         run: |
           $stage = "stage"
-          New-Item -ItemType Directory -Force $stage | Out-Null
+          New-Item -ItemType Directory -Force $stage, dist | Out-Null
           Copy-Item build/Release/Charivari.clap $stage/
           Copy-Item -Recurse build/Release/Charivari.vst3 $stage/
           New-Item -ItemType Directory -Force "$stage/Charivari.vst3/Contents/Resources" | Out-Null
           Copy-Item LICENSE, CREDITS.md "$stage/Charivari.vst3/Contents/Resources/"
           Copy-Item LICENSE, CREDITS.md $stage/
           Copy-Item -Recurse licences $stage/
-          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          choco upgrade innosetup -y --no-progress | Out-Null   # 6.3 or later (x64compatible)
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:VERSION" "/DStage=$PWD\$stage" "/O$PWD\dist" packaging\windows\Charivari.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
           $exe = "dist\Charivari-$env:VERSION-Windows-x64-Setup.exe"
