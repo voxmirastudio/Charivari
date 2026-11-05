@@ -31,7 +31,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           for i in $(seq 1 30); do gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && break; sleep 20; done
-          gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.tar.gz.sha256 --clobber
+          gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz --clobber
   windows:
     runs-on: windows-2022
     steps:
@@ -87,4 +87,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           for i in $(seq 1 30); do gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && break; sleep 20; done
-          gh release upload "$GITHUB_REF_NAME" dist/*.exe dist/*.exe.sha256 --clobber
+          gh release upload "$GITHUB_REF_NAME" dist/*.exe --clobber
+  checksums:
+    # the SHA-256 of the three installers written at the bottom of the release page (no .sha256 files beside them)
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checksums in the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R: ${{ github.repository }}
+        run: |
+          T="$GITHUB_REF_NAME"; mkdir a; cd a
+          for n in $(gh release view "$T" -R "$R" --json assets --jq '.assets[].name'); do
+            case "$n" in *.sha256) gh release delete-asset "$T" "$n" -R "$R" -y;; esac
+          done
+          gh release download "$T" -R "$R" --pattern 'Charivari-*'
+          gh release view "$T" -R "$R" --json body --jq .body | sed '/^### SHA-256/,$d' > body.md
+          { cat body.md; printf '\n### SHA-256\n```\n'; sha256sum Charivari-*; printf '```\n'; } > notes.md
+          gh release edit "$T" -R "$R" --notes-file notes.md
+          sha256sum Charivari-*
